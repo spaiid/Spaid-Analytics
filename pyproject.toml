@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "signalforge"
+version = "0.1.0"
+description = "SignalForge - Phase 1"
+authors = ["You <you@example.com>"]
+packages = [{include = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+polars = "^1.9.0"
+pyarrow = "^17.0.0"
+duckdb = "^1.1.0"
+pydantic = "^2.7.0"
+requests = "^2.32.0"
+beautifulsoup4 = "^4.12.0"
+tldextract = "^5.1.0"
+rapidfuzz = "^3.9.0"
+great-expectations = "^1.1.0"
+dagster = ">=1.11.3,<1.12"  # <-- safe band that supports 3.12
+dagit = ">=1.11.3,<1.12"    # <-- UI to match dagster
+boto3 = "^1.34.0"
+python-dateutil = "^2.9.0"
+pandas = "^2.3.3"
+pandas-market-calendars = "^5.1.1"
+tzdata = "^2025.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+ruff = "^0.6.0"

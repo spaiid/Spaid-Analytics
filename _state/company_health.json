@@ -1,0 +1,75 @@
+{
+  "ok": [],
+  "fail": [
+    {
+      "key": "salesforce",
+      "platform": "workday_cxs",
+      "ok": false,
+      "reason": "422 Client Error: Unprocessable Entity for url: https://salesforce.wd1.myworkdayjobs.com/wday/cxs/wday/External/jobs",
+      "secs": 0.4982292652130127
+    },
+    {
+      "key": "nvidia",
+      "platform": "workday_cxs",
+      "ok": false,
+      "reason": "422 Client Error: Unprocessable Entity for url: https://nvidia.wd5.myworkdayjobs.com/wday/cxs/wday/NVIDIAExternalCareerSite/jobs",
+      "secs": 0.5040359497070312
+    },
+    {
+      "key": "intel",
+      "platform": "workday_cxs",
+      "ok": false,
+      "reason": "422 Client Error: Unprocessable Entity for url: https://intel.wd1.myworkdayjobs.com/wday/cxs/wday/External/jobs",
+      "secs": 0.5060381889343262
+    },
+    {
+      "key": "adobe",
+      "platform": "workday_cxs",
+      "ok": false,
+      "reason": "422 Client Error: Unprocessable Entity for url: https://adobe.wd5.myworkdayjobs.com/wday/cxs/wday/AdobeExternal/jobs",
+      "secs": 0.5154662132263184
+    },
+    {
+      "key": "amd",
+      "platform": "workday_cxs",
+      "ok": false,
+      "reason": "422 Client Error: Unprocessable Entity for url: https://amd.wd1.myworkdayjobs.com/wday/cxs/wday/External/jobs",
+      "secs": 0.5405764579772949
+    },
+    {
+      "key": "microsoft",
+      "platform": "workday_cxs",
+      "ok": false,
+      "reason": "422 Client Error: Unprocessable Entity for url: https://microsoft.wd3.myworkdayjobs.com/wday/cxs/wday/Microsoft/jobs",
+      "secs": 0.7485644817352295
+    },
+    {
+      "key": "boeing",
+      "platform": "workday_cxs",
+      "ok": false,
+      "reason": "422 Client Error: Unprocessable Entity for url: https://boeing.wd1.myworkdayjobs.com/wday/cxs/wday/Boeing/jobs",
+      "secs": 0.4692196846008301
+    },
+    {
+      "key": "lockheed",
+      "platform": "workday_cxs",
+      "ok": false,
+      "reason": "422 Client Error: Unprocessable Entity for url: https://lockheedmartin.wd1.myworkdayjobs.com/wday/cxs/wday/External/jobs",
+      "secs": 0.482452392578125
+    },
+    {
+      "key": "goldmansachs",
+      "platform": "workday_cxs",
+      "ok": false,
+      "reason": "422 Client Error: Unprocessable Entity for url: https://gs.wd1.myworkdayjobs.com/wday/cxs/wday/GS/jobs",
+      "secs": 0.47202467918395996
+    },
+    {
+      "key": "jpmorgan",
+      "platform": "workday_cxs",
+      "ok": false,
+      "reason": "422 Client Error: Unprocessable Entity for url: https://jpmchase.wd5.myworkdayjobs.com/wday/cxs/wday/JPMC/jobs",
+      "secs": 0.572608232498169
+    }
+  ]
+}
