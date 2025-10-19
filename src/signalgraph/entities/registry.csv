@@ -1,0 +1,5 @@
+ticker,domain,company_name,aliases
+NVDA,nvidia.com,NVIDIA,"nvidia; nvidia corp"
+MSFT,microsoft.com,Microsoft,"microsoft; ms corp"
+AAPL,apple.com,Apple,"apple inc"
+...

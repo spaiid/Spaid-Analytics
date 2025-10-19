@@ -23,6 +23,9 @@ python-dateutil = "^2.9.0"
 pandas = "^2.3.3"
 pandas-market-calendars = "^5.1.1"
 tzdata = "^2025.2"
+playwright = "^1.55.0"
+yfinance = "^0.2.66"
+scikit-learn = "^1.7.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"

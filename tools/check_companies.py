@@ -8,13 +8,14 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 from ingest.sources.job_postings.fetch import COMPANIES
-from ingest.sources.job_postings.adapters import greenhouse, lever, workday, workday_cxs
+from ingest.sources.job_postings.adapters import greenhouse, lever, workday, workday_cxs, workday_cxs_browser
 
 ADAPTERS = {
     "greenhouse": greenhouse.fetch_company,
     "lever": lever.fetch_company,
     "workday": workday.fetch_company,
     "workday_cxs": workday_cxs.fetch_company,
+    "workday_cxs_browser": workday_cxs_browser.fetch_company
 }
 
 def probe(company, verbose=False):

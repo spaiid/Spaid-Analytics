@@ -4,84 +4,155 @@ from datetime import datetime, timezone
 import time
 import requests
 
-# POST-based Workday "cxs" search API:
-#   https://{host}/wday/cxs/{tenant}/{board}/jobs
-# Body example:
-#   {"appliedFacets":{}, "limit":20, "offset":0, "searchText":""}
-#
-# This adapter paginates until no more results. It is resilient to slight
-# schema variations across tenants.
-
 DEFAULT_LIMIT = 50
 DEFAULT_TIMEOUT = 15.0
-UA = {"User-Agent": "SignalForge/0.1 (+research; polite)"}
 
-def _post_json(url: str, body: dict, timeout: float = DEFAULT_TIMEOUT) -> dict:
-    r = requests.post(url, json=body, headers=UA, timeout=timeout)
-    # Many tenants return 4xx/5xx intermittently; don't retry too aggressively here.
+def _headers(host: str) -> dict:
+    base = f"https://{host}"
+    return {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SignalForge/0.1",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Origin": base,
+        "Referer": base + "/",
+        "Content-Type": "application/json;charset=UTF-8",
+    }
+
+class WorkdayHTTPError(Exception):
+    pass
+
+def _post_json(url: str, body: dict, host: str, timeout: float) -> dict:
+    r = requests.post(url, json=body, headers=_headers(host), timeout=timeout)
+    if r.status_code in (400, 404, 422):
+        raise WorkdayHTTPError(f"{r.status_code} {r.reason} for url: {url}")
     r.raise_for_status()
-    return r.json()
+    try:
+        return r.json()
+    except ValueError:
+        raise WorkdayHTTPError(f"Non-JSON response from {url} (len={len(r.content)})")
+
+def _get_json(url: str, host: str, params: dict, timeout: float) -> dict:
+    r = requests.get(url, params=params, headers=_headers(host), timeout=timeout)
+    if r.status_code in (400, 404, 422):
+        raise WorkdayHTTPError(f"{r.status_code} {r.reason} for url: {r.url}")
+    r.raise_for_status()
+    try:
+        return r.json()
+    except ValueError:
+        raise WorkdayHTTPError(f"Non-JSON response from {r.url} (len={len(r.content)})")
+
 
 def _safe_iso(s: Optional[str]) -> Optional[str]:
     if not s:
         return None
-    # Some fields are already ISO; others might be like "2024-09-02"
     try:
-        # Try parse common Workday format "YYYY-MM-DD"
         if len(s) == 10 and s[4] == "-" and s[7] == "-":
-            dt = datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            return dt.isoformat()
-        # Else, accept as-is
+            return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc).isoformat()
         return s
     except Exception:
         return None
 
+def _tenant_candidates(company: Dict) -> List[str]:
+    cand = []
+    if company.get("tenant"):
+        cand.append(str(company["tenant"]))
+    prefix = company["host"].split(".", 1)[0]
+    if prefix not in cand:
+        cand.append(prefix)
+    if "wday" not in cand:
+        cand.append("wday")
+    return cand
+
+# Known body shapes tenants accept; we’ll try in order.
+def _body_templates(limit: int, offset: int, query: str) -> List[dict]:
+    return [
+        # Minimal (works for many)
+        {"appliedFacets": {}, "limit": limit, "offset": offset, "searchText": query},
+        # Add languages
+        {
+            "appliedFacets": {},
+            "limit": limit, "offset": offset, "searchText": query,
+            "siteLanguage": "en-US", "userSelectedLanguage": "en-US"
+        },
+        # Add languages + sort newest first (common at big tenants)
+        {
+            "appliedFacets": {},
+            "limit": limit, "offset": offset, "searchText": query,
+            "siteLanguage": "en-US", "userSelectedLanguage": "en-US",
+            "sort": "Most recent"  # Workday accepts string labels on some sites
+        },
+        # Explicit facet keys (empty arrays) – some schemas require presence
+        {
+            "appliedFacets": {"locations": [], "timeType": [], "jobFamilyGroup": [], "workerSubType": []},
+            "limit": limit, "offset": offset, "searchText": query,
+            "siteLanguage": "en-US", "userSelectedLanguage": "en-US",
+        },
+    ]
+
+def _try_page(host: str, tenant: str, board: str, limit: int, offset: int, query: str, timeout: float) -> dict:
+    base = f"https://{host}/wday/cxs/{tenant}/{board}/jobs"
+
+    last_err = None
+
+    # 1) Try POST with several body templates (some tenants are picky)
+    for body in _body_templates(limit, offset, query):
+        try:
+            return _post_json(base, body, host, timeout)
+        except WorkdayHTTPError as e:
+            last_err = e
+            continue
+
+    # 2) GET fallback (a few tenants only accept GET for search)
+    try:
+        return _get_json(base, host, {"limit": limit, "offset": offset, "searchText": query}, timeout)
+    except WorkdayHTTPError as e:
+        last_err = e
+
+    if last_err:
+        raise last_err
+    raise WorkdayHTTPError("Unknown Workday error")
+
 def fetch_company(company: Dict) -> List[Dict]:
     """
-    company = {
-      "key": "nvidia",
-      "brand": "NVIDIA",
-      "domain": "nvidia.com",
-      "platform": "workday_cxs",
-      "host": "nvidia.wd5.myworkdayjobs.com",
-      "tenant": "wday",                      # often literally "wday" for external
-      "board": "NVIDIAExternalCareerSite",   # path segment
-      # optional:
-      # "query": "",                          # search text
-      # "limit": 50,                          # page size (<= 50 is polite)
-      # "sleep": 0.2,                         # between pages
-      # "timeout": 15.0                       # request timeout
-    }
+    Required fields in company:
+      host:    e.g., "nvidia.wd5.myworkdayjobs.com"
+      board:   e.g., "NVIDIAExternalCareerSite"
+      brand, domain, key: used for normalization/metadata
+    Optional:
+      tenant, query, limit, sleep, timeout
     """
     host     = company["host"].rstrip("/")
-    tenant   = company.get("tenant", "wday")
     board    = company["board"]
     query    = company.get("query", "")
     limit    = int(company.get("limit", DEFAULT_LIMIT))
-    sleep    = float(company.get("sleep", 0.2))
+    sleep    = float(company.get("sleep", 0.25))  # be polite
     timeout  = float(company.get("timeout", DEFAULT_TIMEOUT))
-
-    url = f"https://{host}/wday/cxs/{tenant}/{board}/jobs"
+    tenants  = _tenant_candidates(company)
 
     rows: List[Dict[str, Any]] = []
-    offset = 0
-    total_seen = 0
     now = datetime.now(timezone.utc).isoformat()
-
-    # Base body; we keep this minimal for breadth.
-    base_body = {
-        "appliedFacets": {},   # add facet filters if needed later
-        "limit": limit,
-        "offset": offset,
-        "searchText": query,
-    }
+    total_seen = 0
+    offset = 0
+    chosen_tenant: Optional[str] = None
 
     while True:
-        body = dict(base_body, offset=offset)
-        data = _post_json(url, body, timeout=timeout)
+        last_err = None
+        for tenant in tenants if chosen_tenant is None else [chosen_tenant]:
+            try:
+                data = _try_page(host, tenant, board, limit, offset, query, timeout)
+                chosen_tenant = tenant
+                break
+            except WorkdayHTTPError as e:
+                last_err = e
+                continue
+            except requests.HTTPError as e:
+                # Real server errors (403/500) – surface for visibility
+                raise
+        else:
+            if last_err:
+                raise last_err
+            raise WorkdayHTTPError("No valid tenant endpoint")
 
-        # Common shapes:
-        # {"total":1234, "jobPostings":[{...}, {...}]}
         job_list = []
         if isinstance(data, dict):
             if isinstance(data.get("jobPostings"), list):
@@ -93,21 +164,10 @@ def fetch_company(company: Dict) -> List[Dict]:
             break
 
         for j in job_list:
-            # Broad normalization across flavors we’ve seen
-            jid = (
-                j.get("id")
-                or j.get("jobId")
-                or j.get("number")
-                or j.get("externalPath")
-                or j.get("title")
-            )
+            jid = j.get("id") or j.get("jobId") or j.get("number") or j.get("externalPath") or j.get("title")
             title = j.get("title") or j.get("jobTitle")
-            loc = (
-                j.get("locationsText")
-                or j.get("location")
-                or (j.get("locations") or [{}])[0].get("name")
-                if j.get("locations") else None
-            )
+            loc = (j.get("locationsText") or j.get("location") or
+                   ((j.get("locations") or [{}])[0].get("name") if j.get("locations") else None))
             url_abs = j.get("externalPath") or j.get("jobPostingUrl") or j.get("url")
             dept = j.get("category") or j.get("jobFamily") or j.get("businessUnit")
             posted = _safe_iso(j.get("postedOn") or j.get("startDate") or j.get("postedDate"))
@@ -131,14 +191,10 @@ def fetch_company(company: Dict) -> List[Dict]:
 
         total_seen += len(job_list)
         offset += limit
-        # Some tenants cap results; stop if we reached reported total
         if isinstance(data.get("total"), int) and total_seen >= int(data["total"]):
             break
-
-        # Safety: stop if page returned less than limit
         if len(job_list) < limit:
             break
-
         time.sleep(sleep)
 
     return rows

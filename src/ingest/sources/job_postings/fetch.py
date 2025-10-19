@@ -5,7 +5,7 @@ import polars as pl
 
 from src.schemas.raw_job_posting import RawJobPosting
 from src.common.io import write_parquet_partition
-from .adapters import greenhouse, lever, workday, workday_cxs
+from .adapters import greenhouse, lever, workday, workday_cxs, workday_cxs_browser
 
 # near the top of fetch.py
 from pathlib import Path
@@ -50,34 +50,34 @@ COMPANIES: list[dict] = [
     {"key": "angellist",   "brand": "AngelList",   "domain": "angel.co",        "platform": "lever",       "org": "angellist"},
 
     # --- Workday via POST (cxs) for F500/big-tech ---
-    {"key": "nvidia",     "brand": "NVIDIA",    "domain": "nvidia.com",     "platform": "workday_cxs",
+    {"key": "nvidia",     "brand": "NVIDIA",    "domain": "nvidia.com",     "platform": "workday_cxs_browser",
     "host": "nvidia.wd5.myworkdayjobs.com",    "tenant": "wday", "board": "NVIDIAExternalCareerSite"},
 
-    {"key": "amd",        "brand": "AMD",       "domain": "amd.com",        "platform": "workday_cxs",
+    {"key": "amd",        "brand": "AMD",       "domain": "amd.com",        "platform": "workday_cxs_browser",
     "host": "amd.wd1.myworkdayjobs.com",       "tenant": "wday", "board": "External"},
 
-    {"key": "microsoft",  "brand": "Microsoft", "domain": "microsoft.com",  "platform": "workday_cxs",
+    {"key": "microsoft",  "brand": "Microsoft", "domain": "microsoft.com",  "platform": "workday_cxs_browser",
     "host": "microsoft.wd3.myworkdayjobs.com", "tenant": "wday", "board": "Microsoft"},
 
-    {"key": "adobe",      "brand": "Adobe",     "domain": "adobe.com",      "platform": "workday_cxs",
+    {"key": "adobe",      "brand": "Adobe",     "domain": "adobe.com",      "platform": "workday_cxs_browser",
     "host": "adobe.wd5.myworkdayjobs.com",     "tenant": "wday", "board": "AdobeExternal"},
 
-    {"key": "salesforce", "brand": "Salesforce","domain": "salesforce.com", "platform": "workday_cxs",
+    {"key": "salesforce", "brand": "Salesforce","domain": "salesforce.com", "platform": "workday_cxs_browser",
     "host": "salesforce.wd1.myworkdayjobs.com","tenant": "wday", "board": "External"},
 
-    {"key": "intel",      "brand": "Intel",     "domain": "intel.com",      "platform": "workday_cxs",
+    {"key": "intel",      "brand": "Intel",     "domain": "intel.com",      "platform": "workday_cxs_browser",
     "host": "intel.wd1.myworkdayjobs.com",     "tenant": "wday", "board": "External"},
 
-    {"key": "boeing",     "brand": "Boeing",    "domain": "boeing.com",     "platform": "workday_cxs",
+    {"key": "boeing",     "brand": "Boeing",    "domain": "boeing.com",     "platform": "workday_cxs_browser",
     "host": "boeing.wd1.myworkdayjobs.com",    "tenant": "wday", "board": "Boeing"},
 
-    {"key": "lockheed",   "brand": "Lockheed Martin","domain": "lockheedmartin.com","platform": "workday_cxs",
+    {"key": "lockheed",   "brand": "Lockheed Martin","domain": "lockheedmartin.com","platform": "workday_cxs_browser",
     "host": "lockheedmartin.wd1.myworkdayjobs.com","tenant": "wday", "board": "External"},
 
-    {"key": "jpmorgan",   "brand": "J.P. Morgan","domain": "jpmorganchase.com","platform": "workday_cxs",
+    {"key": "jpmorgan",   "brand": "J.P. Morgan","domain": "jpmorganchase.com","platform": "workday_cxs_browser",
     "host": "jpmchase.wd5.myworkdayjobs.com",  "tenant": "wday", "board": "JPMC"},
 
-    {"key": "goldmansachs","brand": "Goldman Sachs","domain": "goldmansachs.com","platform": "workday_cxs",
+    {"key": "goldmansachs","brand": "Goldman Sachs","domain": "goldmansachs.com","platform": "workday_cxs_browser",
     "host": "gs.wd1.myworkdayjobs.com",        "tenant": "wday", "board": "GS"},
 ]
 
@@ -87,7 +87,8 @@ ADAPTERS = {
     "greenhouse": greenhouse.fetch_company,
     "lever": lever.fetch_company,
     "workday": workday.fetch_company,
-    "workday_cxs": workday_cxs.fetch_company
+    "workday_cxs": workday_cxs.fetch_company,
+    "workday_cxs_browser": workday_cxs_browser.fetch_company,
 }
 
 SCHEMA = {
