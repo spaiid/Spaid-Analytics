@@ -5,12 +5,18 @@ from sklearn.metrics import r2_score, mean_squared_error
 import numpy as np
 
 FEATURES = [
+  # returns & momentum
   "ret_1d","ret_5d","ret_20d","ret_60d",
+  # moving averages / position vs MA
   "ma10","ma20","ma50","px_over_ma20",
+  # volatility
   "vol_cc_20","vol_cc_60","rv_rc_20",
+  # volume structure
   "vol_ma20","vol_rel_20",
-  "rsi14","macd","macd_signal","macd_hist"
+  # oscillators
+  "rsi14","macd","macd_signal","macd_hist",
 ]
+
 
 TARGET = "ret_fwd_20d"
 
