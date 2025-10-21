@@ -6,7 +6,7 @@ from ingest.sources.google_trends.fetch import fetch_trends, trends_to_signals
 
 @asset
 def sg_market_daily(context: AssetExecutionContext):
-    tickers = ["NVDA","MSFT","AAPL","AMZN","GOOGL"]
+    tickers = ["NVDA","MSFT","AAPL","AMZN","GOOGL", "SPY"]
     all_df = []
     for t in tickers:
         rows = fetch_ohlcv(t)            # implement with Polygon/Yahoo

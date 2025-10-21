@@ -7,7 +7,7 @@ from signalgraph.io import write_signals
 
 @asset
 def sg_market_daily(context):
-    tickers = ["NVDA", "MSFT", "AAPL", "AMZN", "GOOGL"]
+    tickers = ["NVDA", "MSFT", "AAPL", "AMZN", "GOOGL", "SPY"]
     frames = []
     for t in tickers:
         try:
