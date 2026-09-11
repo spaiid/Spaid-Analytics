@@ -2,3 +2,7 @@ node_modules
 dist
 *.local
 .DS_Store
+
+# Scratch files from local smoke testing; not part of the app
+.smoke-*
+vite.mocktest.config.ts
