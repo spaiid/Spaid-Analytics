@@ -663,7 +663,11 @@ def _confidence(company_id: str, row: dict, detail: S.StockDetail) -> S.Confiden
         method_dispersion=dispersion,
         score_change_1m=row.get("score_change_1m"),
         business_model=detail.business_model or "operating",
-        n_analysts=None,
+        # Passing None here claimed analyst coverage was unknown for every
+        # company, so the detail page scored each one up to five points below
+        # the ranked list it was reached from and roughly 8% of names carried
+        # two different confidence labels at once.
+        n_analysts=row.get("n_analysts"),
         n_missing_metrics=n_missing,
     )
     return S.Confidence(

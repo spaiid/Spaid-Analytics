@@ -219,6 +219,36 @@ def run_validation(
         )
 
     # ---- how much search happened ----------------------------------------
+    # The deflation has to know about every trial, including the ones that ran
+    # after it was first computed.
+    #
+    # Each variant's deflated Sharpe was calculated inside `_run_variant`, which
+    # happens before the robustness battery exists, so it was deflated against
+    # roughly half the search that actually took place: the development period
+    # reported an expected-maximum Sharpe of 0.4709 against a true 0.8603, and a
+    # probability of 0.6784 where the honest figure is 0.3488 -- the published
+    # number was about twice what the evidence supported. Recomputing here, once
+    # the register is complete, is the only point at which the count is final.
+    final_trials = registry.trial_count(strategy.version)
+    for outcome in variant_results.values():
+        for key, path in (("net_summary", outcome.get("net")),
+                          ("gross_summary", outcome.get("gross"))):
+            block = outcome.get(key)
+            if not block or "deflated_sharpe" not in block or path is None:
+                continue
+            restated = metrics_mod.deflated_sharpe(
+                metrics_mod.to_returns(path.equity), n_trials=final_trials
+            )
+            block["deflated_sharpe"] = {
+                "sharpe_annual": restated.sharpe_annual,
+                "expected_max_sharpe_annual": restated.expected_max_sharpe_annual,
+                "probability": restated.deflated,
+                "n_trials": restated.n_trials,
+                "skew": restated.skew,
+                "kurtosis": restated.kurtosis,
+                "verdict": restated.verdict,
+            }
+
     matrix, _trial_run_ids = registry.trial_return_matrix(strategy.version, period_label=period_label)
     pbo = (
         metrics_mod.probability_of_backtest_overfitting(matrix)

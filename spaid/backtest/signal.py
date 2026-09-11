@@ -38,6 +38,37 @@ log = logging.getLogger(__name__)
 
 CATEGORY_COLUMNS: tuple[str, ...] = tuple(c.value for c in Category)
 
+# Observations needed before an expanding quantile means anything. Below this
+# the regime is left undefined rather than guessed from a handful of dates.
+_MIN_REGIME_HISTORY = 10
+
+
+def _expanding_bands(
+    values: np.ndarray, *, low: float = 33.0, high: float = 67.0
+) -> tuple[np.ndarray, np.ndarray]:
+    """Tercile boundaries computed only from what had already happened.
+
+    Taking `np.percentile` over the whole sample decides which dates count as
+    low-volatility using the volatility of dates that had not happened yet. It
+    is a subtle look-ahead, and it landed on the single strongest number in the
+    validation artifacts -- a low-volatility information coefficient of +0.079
+    with a t-statistic of 3.23, the only t above 2 anywhere in the run. A fifth
+    of the development dates change bucket once the threshold can only see the
+    past, so that figure was not reproducible out of sample.
+
+    Returns NaN bands until `_MIN_REGIME_HISTORY` observations exist, which
+    leaves those dates in the middle bucket.
+    """
+    lows = np.full(values.size, np.nan)
+    highs = np.full(values.size, np.nan)
+    for i in range(values.size):
+        seen = values[: i + 1]
+        seen = seen[np.isfinite(seen)]
+        if seen.size >= _MIN_REGIME_HISTORY:
+            lows[i] = np.percentile(seen, low)
+            highs[i] = np.percentile(seen, high)
+    return lows, highs
+
 
 # ---------------------------------------------------------------------------
 # Correlation
@@ -369,27 +400,24 @@ def classify_regimes(
         return pl.DataFrame()
 
     vol = at_dates["vol63"].to_numpy()
-    finite_vol = vol[np.isfinite(vol)]
-    vol_low, vol_high = (
-        (np.percentile(finite_vol, 33), np.percentile(finite_vol, 67))
-        if finite_vol.size > 10
-        else (np.nan, np.nan)
-    )
+    vol_low, vol_high = _expanding_bands(vol)
 
     out = at_dates.with_columns(
+        pl.Series("_vol_low", vol_low), pl.Series("_vol_high", vol_high)
+    ).with_columns(
         pl.when(pl.col("from_peak") <= -0.10)
         .then(pl.lit("bear"))
         .when((pl.col("close_adj") > pl.col("ma200")) & (pl.col("ma200_slope") > 0))
         .then(pl.lit("bull"))
         .otherwise(pl.lit("neutral"))
         .alias("trend_regime"),
-        pl.when(pl.col("vol63") >= vol_high)
+        pl.when(pl.col("vol63") >= pl.col("_vol_high"))
         .then(pl.lit("high_volatility"))
-        .when(pl.col("vol63") <= vol_low)
+        .when(pl.col("vol63") <= pl.col("_vol_low"))
         .then(pl.lit("low_volatility"))
         .otherwise(pl.lit("mid_volatility"))
         .alias("volatility_regime"),
-    )
+    ).drop("_vol_low", "_vol_high")
 
     yields = fred_rates.load()
     if yields is not None and not yields.is_empty():
@@ -404,11 +432,13 @@ def classify_regimes(
         rate = joined["yield_10y"].to_numpy()
         finite_rate = rate[np.isfinite(rate)]
         if finite_rate.size > 10:
-            lo, hi = np.percentile(finite_rate, 33), np.percentile(finite_rate, 67)
+            rate_low, rate_high = _expanding_bands(rate)
             out = joined.with_columns(
-                pl.when(pl.col("yield_10y") >= hi)
+                pl.Series("_rate_low", rate_low), pl.Series("_rate_high", rate_high)
+            ).with_columns(
+                pl.when(pl.col("yield_10y") >= pl.col("_rate_high"))
                 .then(pl.lit("high_rate"))
-                .when(pl.col("yield_10y") <= lo)
+                .when(pl.col("yield_10y") <= pl.col("_rate_low"))
                 .then(pl.lit("low_rate"))
                 .otherwise(pl.lit("mid_rate"))
                 .alias("rate_regime")

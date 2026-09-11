@@ -566,6 +566,10 @@ OPPORTUNITY_SCORES = TableSpec(
         "momentum": pl.Float64,
         "valuation": pl.Float64,
         "coverage": pl.Float64,
+        # Carried so the detail page can reproduce the confidence the ranked list
+        # shows, rather than recomputing it without analyst coverage and landing
+        # up to five points lower on the same company.
+        "n_analysts": pl.Int32,
         "confidence": pl.Float64,
         "confidence_label": pl.Utf8,
         "score_change_1w": pl.Float64,
