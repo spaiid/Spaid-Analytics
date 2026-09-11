@@ -20,7 +20,6 @@ import {
   Routes,
   matchPath,
   useLocation,
-  useNavigate,
   useParams,
 } from 'react-router-dom';
 
@@ -69,12 +68,12 @@ function readTicker(pathname: string): string | null {
 }
 
 /** Reads the ticker out of the URL and hands it to the detail view. */
-function StockRoute() {
+function StockRoute({ refreshToken }: { refreshToken: number | null }) {
   const params = useParams();
   const raw = params.ticker ?? '';
   const ticker = decodeURIComponent(raw).trim().toUpperCase();
   if (ticker === '') return <Navigate to="/opportunities" replace />;
-  return <StockDetailView ticker={ticker} />;
+  return <StockDetailView ticker={ticker} refreshToken={refreshToken} />;
 }
 
 function NotFoundRoute() {
@@ -225,16 +224,25 @@ function AppShell() {
 
           {showFinished && (
             <Banner tone="good" title="Pipeline run finished" onDismiss={pipeline.dismiss}>
-              Finished at {dateTime(new Date(pipeline.finishedAt ?? Date.now()))}. The views on this page have been
-              re-read.
+              Finished at {dateTime(new Date(pipeline.finishedAt ?? Date.now()))}. Every open view has re-read the
+              store, so the numbers on screen are the ones the run just wrote.
             </Banner>
           )}
 
           <Routes>
             <Route path="/" element={<Navigate to="/opportunities" replace />} />
-            <Route path="/opportunities" element={<OpportunitiesView />} />
+            <Route
+              path="/opportunities"
+              element={
+                <OpportunitiesView
+                  onRunPipeline={pipeline.start}
+                  pipelineBusy={busy}
+                  refreshToken={pipeline.finishedAt}
+                />
+              }
+            />
             <Route path="/stock" element={<Navigate to="/opportunities" replace />} />
-            <Route path="/stock/:ticker" element={<StockRoute />} />
+            <Route path="/stock/:ticker" element={<StockRoute refreshToken={pipeline.finishedAt} />} />
             <Route
               path="/health"
               element={

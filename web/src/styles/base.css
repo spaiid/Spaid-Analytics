@@ -167,7 +167,10 @@ svg { display: block; }
 }
 
 /* refetch holds the previous render at reduced opacity — no skeleton flash */
-.is-refreshing { opacity: 0.45; transition: opacity 120ms ease; pointer-events: none; }
+.is-refreshing { opacity: 0.45; transition: opacity 120ms ease; }
+/* Dim the content during a background reload, but never the controls: a panel
+   that disables its own retry button while it looks present is a dead end. */
+.is-refreshing :is(button, a, input, select, textarea, [tabindex]) { pointer-events: auto; }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }

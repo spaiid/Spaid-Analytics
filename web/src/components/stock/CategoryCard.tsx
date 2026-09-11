@@ -48,7 +48,13 @@ export function CategoryCard({ category, ticker, open, onToggle }: CategoryCardP
 
   return (
     <section className={['sd-cat', open ? 'is-open' : null].filter(Boolean).join(' ')}>
-      <button type="button" className="sd-cat-head" aria-expanded={open} aria-controls={panelId} onClick={onToggle}>
+      {/*
+        The header is a <div>, not a <button>: it carries a role="meter" bar and
+        an assessment pill, and neither is valid inside a button's phrasing
+        content — nesting them there would also swallow both into the button's
+        accessible name. The toggle below is the only interactive element.
+      */}
+      <div className="sd-cat-head">
         <div className="sd-cat-top">
           <span className="sd-cat-label">{category.label}</span>
           <span className="tag">{pct(category.weight, 0)} of composite</span>
@@ -82,11 +88,19 @@ export function CategoryCard({ category, ticker, open, onToggle }: CategoryCardP
 
         {category.assessment && <AssessmentPill assessment={category.assessment} />}
 
-        <span className="sd-cat-chevron">
+        <button
+          type="button"
+          className="sd-cat-toggle"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={onToggle}
+        >
           <Chevron size={12} />
-          <span>{open ? 'Hide the metrics behind this score' : 'Show the metrics behind this score'}</span>
-        </span>
-      </button>
+          <span>
+            {open ? 'Hide' : 'Show'} the {category.label.toLowerCase()} metrics behind this score
+          </span>
+        </button>
+      </div>
 
       <div className="sd-cat-body" id={panelId} hidden={!open}>
         <div className="sd-metric-group">

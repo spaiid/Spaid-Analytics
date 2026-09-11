@@ -68,12 +68,21 @@
   display: flex; flex-direction: column; gap: 10px; width: 100%;
   padding: 14px 16px; text-align: left;
 }
-.sd-cat-head:hover { background: var(--wash); }
 .sd-cat-head .pill { align-self: flex-start; }
+/* The toggle, not the header, is the interactive element — so it, not the whole
+   panel, is what lights up on hover. */
+.sd-cat-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  align-self: flex-start; text-align: left;
+  color: var(--text-muted); font-size: 11.5px;
+  min-height: 24px; padding: 4px 8px; margin-left: -8px;
+  border-radius: var(--radius-sm);
+  transition: background 120ms ease, color 120ms ease;
+}
+.sd-cat-toggle:hover { background: var(--wash); color: var(--text-primary); }
 .sd-cat-top { display: flex; align-items: baseline; gap: 8px; }
 .sd-cat-label { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
 .sd-cat-score { margin-left: auto; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--text-primary); }
-.sd-cat-chevron { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 11.5px; }
 .sd-cat-facts { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .sd-cat-body { border-top: 1px solid var(--border); padding: 14px 16px 4px; background: var(--surface-1); }
 .sd-metric-group + .sd-metric-group { margin-top: 18px; }

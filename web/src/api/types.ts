@@ -41,6 +41,14 @@ export interface DataFreshness {
  */
 export type MetricStatus = 'scored' | 'missing' | 'not_applicable' | 'thin_peers';
 
+/**
+ * `MetricDetail.status` as the wire actually types it: one of the four values
+ * above, but an open string, so a value the API adds later still parses. The
+ * `(string & {})` arm keeps the four literals in autocomplete instead of
+ * collapsing the union to plain `string`.
+ */
+export type MetricStatusValue = MetricStatus | (string & {});
+
 /** One scored metric, with everything needed to explain it. */
 export interface MetricDetail {
   key: string;
@@ -64,7 +72,7 @@ export interface MetricDetail {
   /** Points this metric contributed to its category score. */
   contribution: number | null;
   /** One of MetricStatus; the API types it as an open string. */
-  status: MetricStatus | string;
+  status: MetricStatusValue;
   status_detail: string | null;
   /** +1 when higher is better, -1 when lower is better. */
   direction: number;
@@ -182,7 +190,10 @@ export interface ValueTrap {
 export interface ConfidenceComponent {
   key: string;
   label: string;
-  /** 0-100. */
+  /**
+   * Fraction, 0-1. schemas.py carries no scale note here, but the producer
+   * (spaid/pipeline/confidence.py) clamps every component to 0-1.
+   */
   score: number;
   /** Fraction, 0-1. */
   weight: number;
@@ -190,7 +201,11 @@ export interface ConfidenceComponent {
 }
 
 export interface Confidence {
-  /** 0-100. */
+  /**
+   * Fraction, 0-1 — NOT 0-100. `label_for` in spaid/pipeline/confidence.py
+   * bands it at 0.75 / 0.55 / 0.35, so 0.82 is "High", not "almost none".
+   * Render it through `confidenceFraction` in components/stock/metricFormat.
+   */
   score: number;
   label: string;
   components: ConfidenceComponent[];

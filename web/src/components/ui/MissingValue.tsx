@@ -1,7 +1,7 @@
-import type { MetricStatus } from '../../api/types';
+import type { MetricStatusValue } from '../../api/types';
 import { DASH } from '../../lib/format';
 
-export type MissingKind = MetricStatus | string;
+export type MissingKind = MetricStatusValue;
 
 interface Copy {
   mark: string;

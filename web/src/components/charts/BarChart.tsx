@@ -108,7 +108,12 @@ export function BarChart({
 
           return (
             <>
-              <ChartSvg width={width} height={svgH} ariaLabel={ariaLabel}>
+              <ChartSvg
+                width={width}
+                height={svgH}
+                ariaLabel={ariaLabel}
+                hasInteractiveMarks={Boolean(onBarActivate)}
+              >
                 {niceTicks(lo, hi, 4).map((tick) => (
                   <g key={`t-${tick}`}>
                     <line className="grid-line" x1={sx(tick)} x2={sx(tick)} y1={padT} y2={padT + plotH} />
@@ -208,7 +213,12 @@ export function BarChart({
 
         return (
           <>
-            <ChartSvg width={width} height={height} ariaLabel={ariaLabel}>
+            <ChartSvg
+              width={width}
+              height={height}
+              ariaLabel={ariaLabel}
+              hasInteractiveMarks={Boolean(onBarActivate)}
+            >
               {niceTicks(lo, hi, 5).map((tick) => (
                 <g key={`t-${tick}`}>
                   <line className="grid-line" x1={padL} x2={padL + plotW} y1={sy(tick)} y2={sy(tick)} />

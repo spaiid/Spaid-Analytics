@@ -127,22 +127,38 @@ export function ChartFrame({
 export interface ChartSvgProps {
   width: number;
   height: number;
-  /** Every chart SVG is an image with a meaningful description. */
+  /** Every chart SVG is described in a sentence, whatever its role. */
   ariaLabel: string;
+  /**
+   * True when the chart contains focusable marks (bars a keyboard user can tab
+   * to). `role="img"` prunes an element's descendants from the accessibility
+   * tree, so a focusable bar inside one receives focus that a screen reader
+   * never announces. Such a chart is a `group` instead: same label, descendants
+   * preserved.
+   */
+  hasInteractiveMarks?: boolean;
   children: ReactNode;
   className?: string;
   svgRef?: React.Ref<SVGSVGElement>;
 }
 
-/** The <svg> element every chart draws into: role="img" + aria-label, always. */
-export function ChartSvg({ width, height, ariaLabel, children, className, svgRef }: ChartSvgProps) {
+/** The <svg> element every chart draws into, always with an accessible name. */
+export function ChartSvg({
+  width,
+  height,
+  ariaLabel,
+  hasInteractiveMarks = false,
+  children,
+  className,
+  svgRef,
+}: ChartSvgProps) {
   return (
     <svg
       ref={svgRef}
       className={className}
       viewBox={`0 0 ${width} ${height}`}
       height={height}
-      role="img"
+      role={hasInteractiveMarks ? 'group' : 'img'}
       aria-label={ariaLabel}
     >
       {children}

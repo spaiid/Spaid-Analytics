@@ -10,7 +10,7 @@
  * where it sent a raw number and no string.
  */
 
-import type { MetricDetail, MetricStatus } from '../../api/types';
+import type { MetricDetail, MetricStatusValue } from '../../api/types';
 import { DASH, compactCurrency, dateShort, multiple, num, pct } from '../../lib/format';
 
 /** The unit vocabulary used by the API (`UNIT_BY_METRIC` server-side). */
@@ -47,12 +47,12 @@ export function metricMedianText(metric: MetricDetail): string {
 }
 
 /** True only for the API's "scored" status — anything else is an absence. */
-export function isScored(status: MetricStatus | string | null | undefined): boolean {
+export function isScored(status: MetricStatusValue | null | undefined): boolean {
   return status === 'scored';
 }
 
 /** A visible name for a metric status. Unknown values read as missing. */
-export function statusLabel(status: MetricStatus | string | null | undefined): string {
+export function statusLabel(status: MetricStatusValue | null | undefined): string {
   switch (status) {
     case 'scored':
       return 'Scored';

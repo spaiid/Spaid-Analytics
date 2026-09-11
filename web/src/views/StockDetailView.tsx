@@ -163,12 +163,7 @@ export function StockDetailView({ ticker, refreshToken = null }: StockDetailView
 
       <PeerTable peers={detail.peers} ticker={detail.ticker} />
 
-      <SourcesTable
-        sources={detail.sources}
-        freshness={detail.freshness}
-        ticker={detail.ticker}
-        onRefresh={result.reload}
-      />
+      <SourcesTable sources={detail.sources} freshness={detail.freshness} ticker={detail.ticker} />
     </div>
   );
 }
