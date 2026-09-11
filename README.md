@@ -11,11 +11,31 @@ not run, and every number carries a confidence and a provenance trail.
 
 ## Running it
 
-```bash
-python -m venv .venv && .venv/bin/pip install -e ".[dev]"
+First time only:
 
-spaid run          # fetch data, then score and value the universe
-spaid serve        # http://127.0.0.1:8000
+```bash
+cd /Users/jspaid/Spaid-Analytics
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+(cd web && npm install && npm run build)
+```
+
+Then, in every new terminal, **activate the virtualenv first**. The `spaid`
+command is installed inside `.venv`, so without this your shell reports
+`command not found: spaid`:
+
+```bash
+cd /Users/jspaid/Spaid-Analytics
+source .venv/bin/activate
+
+spaid run      # fetch data, then score and value the universe
+spaid serve    # http://127.0.0.1:8000
+```
+
+Or skip activation and call it by path, which does the same thing:
+
+```bash
+.venv/bin/spaid serve
 ```
 
 Other commands:
@@ -27,12 +47,14 @@ spaid explain NVDA    # every metric behind the score, with the arithmetic
 spaid health          # data-quality report
 ```
 
-The frontend is a React application in `web/`. `npm install && npm run build`
-produces `web/dist`, which the API serves at the same origin. `npm run dev`
-proxies `/api` to the backend for development.
+The frontend is a React application in `web/`. `npm run build` produces
+`web/dist`, which the API serves at the same origin, so there is one process and
+one port. `npm run dev` proxies `/api` to the backend for frontend development.
 
 A full cold run takes about ten minutes, most of it reading SEC filings. A daily
-refresh (prices plus rescoring) takes under a minute.
+refresh (prices plus rescoring) takes under a minute. The data already in
+`data/` is current as of the last run, so `spaid serve` works immediately
+without re-running anything.
 
 ---
 
