@@ -45,6 +45,11 @@ spaid top -n 25       # the ranked list in the terminal
 spaid stock NVDA      # one company's full analysis
 spaid explain NVDA    # every metric behind the score, with the arithmetic
 spaid health          # data-quality report
+
+spaid universe --with-prices        # rebuild historical index membership
+spaid validate --period development # run the validation protocol
+spaid trials                        # every trial, including the failures
+spaid holdout --reason "..." --yes  # open the sealed period (audited)
 ```
 
 The frontend is a React application in `web/`. `npm run build` produces
@@ -67,8 +72,12 @@ without re-running anything.
   Yahoo prices  ──►    fundamentals      ──►      scores       ──►     React app
   Yahoo quotes  ──►    prices            ──►      valuations   ──►     CLI
   Wikipedia     ──►    companies         ──►      risk
-                       securities                 value traps
-                       estimates                  confidence
+  Wiki history  ──►    securities                 value traps
+  FRED          ──►    security master            confidence
+                       ticker history
+                       corporate actions   ──►    backtests    ──►     Validation
+                       index membership           diagnostics          view
+                       estimates                  trial registry
 ```
 
 **Scoring.** A 0–100 composite from four categories with fixed, versioned
@@ -171,10 +180,13 @@ spaid/
   providers/    one adapter per source, all writing the canonical schema
     sec/        XBRL extraction, concept mapping, predecessor linking
     yahoo/      prices, estimates, current quotes
-    wikipedia/  index constituents
+    wikipedia/  index constituents, and their history from page revisions
+    fred/       Treasury yields, for classifying the rate environment
   storage/      table schemas with validation, and the parquet store
   pipeline/     ingestion, metrics, scoring, risk, confidence, quality checks
+                plus the historical security master
   valuation/    discounted cash flow, relative, industry-specific, the blender
+  backtest/     the frozen strategy, the simulator, the diagnostics, the verdict
   api/          response models, assembly, the HTTP service
 web/            React + TypeScript frontend
 tests/          unit tests for every financial formula, plus API contract tests
@@ -183,25 +195,68 @@ legacy/         the previous prototype, archived unmodified
 
 ---
 
+## Validation
+
+Milestone two asked one question: does the existing score predict anything? The
+answer is in the **Validation** view and in `spaid validate`, and the short form
+is that it does not, on the evidence available — and that the evidence is not
+good enough to say so conclusively either.
+
+**The strategy was frozen first.** `strategy-v1` pins the scoring spec, the
+eligibility rules, the portfolio construction, the one-day execution delay and
+the cost model into one checksummed object. The periods, the three portfolio
+variants, the primary variant, the robustness battery and every pass threshold
+were written into `spaid/config/validation.py` before the first run. Nothing was
+adjusted afterwards.
+
+**Survivorship bias is now measured rather than described.** Index membership is
+reconstructed from 147 month-end revisions of the constituents page, which
+recovers 300 index exits the current list does not mention. Prices were then
+recovered for the removed companies that are still listed. What remains missing
+is the half that was acquired, merged or failed — the population whose absence
+flatters a backtest most — and no free source carries their prices or their
+delisting returns. That single gap is why every run is labelled
+**exploratory only** and every conclusion **invalid as evidence of an edge**,
+whatever the returns say.
+
+**What the exploratory runs found.** Over 2016–2020 the top-20 basket returned
+12.3% a year against SPY's 15.5% and SPMO's 16.9%; over 2021–2024, 11.9% against
+13.9% and 17.6%. The three-month rank information coefficient was −0.013 in the
+first period and +0.024 in the second, neither statistically distinguishable
+from zero on non-overlapping blocks. Forward returns do not rise monotonically
+with the score in the first period and do in the second. The score is not, on
+this evidence, selecting stocks.
+
+**The holdout has never been opened.** 2025-01-01 to 2026-08-31 is sealed;
+`spaid holdout` requires a written reason and records it permanently.
+
+---
+
 ## Known limitations
 
 Stated here rather than discovered later.
 
-- **Survivorship bias is half-removed.** Index entry dates prevent trading a
-  company before it joined. Deletions are not available from the constituents
-  source, so historical results are optimistic by an amount that cannot be
-  measured from this data.
+- **Survivorship bias is partly removed, and the remainder is quantified.** 300
+  index exits are recovered and roughly half the removed companies are priced.
+  The rest were acquired, merged or failed. Historical results are optimistic by
+  an amount that cannot be measured from this data, which caps every backtest at
+  "exploratory".
+- **Delisting returns are unknown.** No free source carries them. The simulator
+  never substitutes zero — that would be the specific claim that holders were
+  wiped out — and instead liquidates at the last observed price and counts the
+  event.
 - **Analyst estimates have no history.** The source publishes a current snapshot
-  only, so estimate history accumulates forward from first collection and the
-  backtester must treat it as unavailable at historical dates.
+  only. Seven metrics depend on them, so at historical dates those metrics are
+  absent and the spec renormalises. Growth is tested on 66% of its declared
+  weight, valuation on 80%, momentum on 92%.
+- **Membership dates are bracketed to the month.** The reconstruction observes
+  the index monthly, so an entry or exit is located within a month rather than to
+  the day. Both edges are stored and the backtest takes the conservative one.
 - **Recent spin-offs cannot be assessed on multi-year metrics.** A company with
   two quarters of public financials genuinely has no five-year growth rate.
-  Predecessor linking is applied only to reorganisations, where the same business
-  continues; attaching a parent's history to a spun-off division would be false.
-- **No backtest yet.** The point-in-time backtester, the portfolio engine, and
-  the research journal are specified and scaffolded but not built. Until the
-  strategy has been validated out of sample against SPY and SPMO, the rankings
-  are a structured opinion, not evidence of an edge.
+- **The portfolio engine, the Today page and the research journal are not
+  built.** Until the score shows evidence of predicting returns on data good
+  enough to prove it, the rankings are a structured opinion.
 
 ---
 
@@ -211,5 +266,13 @@ Milestone one is complete: the universe is ranked, every score is explainable to
 the individual metric and peer group, fair values carry ranges and confidence,
 and the calculations are tested.
 
-Next, in order: the point-in-time backtester; validation against SPY and SPMO;
-the portfolio recommendation engine; the Today dashboard; the research journal.
+Milestone two is complete: index membership has history, the point-in-time
+backtester runs, the ranking is measured directly rather than only through a
+portfolio, every trial is registered, and the system states what its own evidence
+can and cannot support. It currently says: no meaningful evidence that the score
+predicts relative returns, on a backtest that is in any case invalid as proof
+because the universe is incomplete.
+
+Next, in order: close the delisted-price gap (the only thing standing between
+these results and a valid test); then re-test the frozen strategy; only then
+consider changing the weights.

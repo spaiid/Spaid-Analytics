@@ -6,7 +6,7 @@
  * router takes over. That keeps /stock/NVDA shareable, bookmarkable and
  * meaningful in server logs.
  *
- *   /opportunities            /stock/AAPL            /health
+ *   /opportunities            /stock/AAPL            /health   /validation
  *   /today  /portfolio  /performance  /journal       (placeholders)
  */
 
@@ -16,6 +16,7 @@ import { useLocation, useNavigate as useRouterNavigate } from 'react-router-dom'
 export type Route =
   | { name: 'opportunities' }
   | { name: 'stock'; ticker: string }
+  | { name: 'validation' }
   | { name: 'health' }
   | { name: 'today' }
   | { name: 'portfolio' }
@@ -40,6 +41,8 @@ export function parsePath(pathname: string): Route {
       const ticker = decodeURIComponent(tail).trim().toUpperCase();
       return ticker === '' ? { name: 'opportunities' } : { name: 'stock', ticker };
     }
+    case 'validation':
+      return { name: 'validation' };
     case 'health':
       return { name: 'health' };
     case 'today':
@@ -62,6 +65,8 @@ export function hrefFor(route: Route): string {
       return '/opportunities';
     case 'stock':
       return `/stock/${encodeURIComponent(route.ticker)}`;
+    case 'validation':
+      return '/validation';
     case 'health':
       return '/health';
     case 'not-found':

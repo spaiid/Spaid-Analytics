@@ -23,7 +23,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from spaid.api import schemas as S
-from spaid.api import service
+from spaid.api import service, validation_service
+from spaid.api import validation_schemas as VS
 
 log = logging.getLogger(__name__)
 
@@ -188,6 +189,23 @@ def pipeline_status() -> dict:
         "started_at": _pipeline_state.get("started_at"),
         "finished_at": _pipeline_state.get("finished_at"),
     }
+
+
+@app.get("/api/validation", response_model=VS.ValidationReport)
+def validation(period: str | None = Query(None)) -> VS.ValidationReport:
+    """The validation report for one period, assembled from stored runs.
+
+    Returns a report with `available=False` rather than a 404 when nothing has
+    been run yet: "no backtest has been done" is a state the interface has to
+    show, not an error it should hide.
+    """
+    return validation_service.get_report(period)
+
+
+@app.get("/api/validation/trials", response_model=VS.TrialRegistry)
+def validation_trials(limit: int | None = Query(None, ge=1, le=1000)) -> VS.TrialRegistry:
+    """Every registered trial, including the ones that failed."""
+    return validation_service.get_trials(limit=limit)
 
 
 @app.get("/api/spec")

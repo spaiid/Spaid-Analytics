@@ -43,6 +43,21 @@ class Migration:
 
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
+        table="universe_membership",
+        version=2,
+        reason=(
+            "Index membership grew from a current-list snapshot into a historical model. "
+            "`date_added`/`date_removed` became `entry_date`/`exit_date`, and the row now "
+            "carries the observation bracket the dates were derived from, how precise each "
+            "edge is, whether the member is tradable at all, and which universe "
+            "reconstruction produced it. The old rows describe the current constituents as "
+            "published, so they migrate to exact entries and unknown exits -- which is what "
+            "they always were, now stated rather than implied."
+        ),
+        renames={"date_added": "entry_date", "date_removed": "exit_date"},
+        transform=lambda df: _universe_membership_v2(df),
+    ),
+    Migration(
         table="earnings_events",
         version=2,
         reason=(
@@ -73,6 +88,31 @@ def _percentage_points_to_fraction(df: pl.DataFrame, column: str) -> pl.DataFram
         return df  # already a fraction
     return df.with_columns(
         (pl.col(column) / 100.0).clip(-10.0, 10.0).alias(column)
+    )
+
+
+def _universe_membership_v2(df: pl.DataFrame) -> pl.DataFrame:
+    """Fill the historical-membership columns for rows written before they existed.
+
+    The old table recorded only who is in the index now and when the published
+    list says they joined. That is exactly an exact entry with an unknown exit,
+    so the migration states it rather than leaving the new columns null and
+    letting a reader assume the exits were checked.
+    """
+    from spaid.storage.schema import UNIVERSE_MEMBERSHIP, coerce
+
+    out = coerce(df, UNIVERSE_MEMBERSHIP)
+    return out.with_columns(
+        pl.coalesce(pl.col("security_id"), pl.col("company_id")).alias("security_id"),
+        pl.when(pl.col("entry_date").is_not_null())
+        .then(pl.lit("exact"))
+        .otherwise(pl.lit("unknown"))
+        .alias("entry_precision"),
+        pl.when(pl.col("exit_date").is_null())
+        .then(pl.lit("unknown"))
+        .otherwise(pl.lit("exact"))
+        .alias("exit_precision"),
+        pl.col("universe_version").fill_null("pre-history-current-list"),
     )
 
 

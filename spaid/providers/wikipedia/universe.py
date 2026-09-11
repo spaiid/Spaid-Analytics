@@ -37,6 +37,11 @@ log = logging.getLogger(__name__)
 WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 SOURCE = "wikipedia_sp500"
 
+# The universe version written by this module. It names what the rows actually
+# are -- today's published constituents -- so a backtest that finds it in the
+# membership table knows it is looking at survivors only.
+CURRENT_LIST_VERSION = "current-list"
+
 
 def to_yahoo(symbol: str) -> str:
     """Wikipedia writes class shares with a dot; Yahoo uses a hyphen."""
@@ -280,18 +285,37 @@ def build_identity(
     )
 
     # ---- index membership ----------------------------------------------------
+    # This is the *current* list, so every row is a member as of today with an
+    # entry date the page states and an exit that has not happened. It is not a
+    # historical reconstruction and does not pretend to be: the exit precision
+    # reads `still_member`, and `spaid.pipeline.security_master` overwrites
+    # these rows with bracketed history when the revision-based reconstruction
+    # has been built.
     membership = (
         df.filter(pl.col("is_primary"))
         .select(
             pl.lit(SETTINGS.universe.name).alias("index_name"),
+            pl.col("company_id").alias("security_id"),
             pl.col("company_id"),
             pl.col("ticker"),
-            pl.col("date_added"),
-            pl.lit(None, dtype=pl.Date).alias("date_removed"),
+            pl.col("date_added").alias("entry_date"),
+            pl.lit(None, dtype=pl.Date).alias("exit_date"),
+            pl.lit(None, dtype=pl.Date).alias("entry_observed_after"),
+            pl.lit(today).alias("entry_observed_by"),
+            pl.lit(None, dtype=pl.Date).alias("exit_observed_after"),
+            pl.lit(None, dtype=pl.Date).alias("exit_observed_by"),
+            pl.when(pl.col("date_added").is_not_null())
+            .then(pl.lit("exact"))
+            .otherwise(pl.lit("unknown"))
+            .alias("entry_precision"),
+            pl.lit("still_member").alias("exit_precision"),
+            pl.lit(None, dtype=pl.Utf8).alias("exit_reason"),
+            pl.lit(True).alias("tradable"),
+            pl.lit(CURRENT_LIST_VERSION).alias("universe_version"),
             pl.lit(SOURCE).alias("source"),
             pl.lit(collected_at).alias("collected_at"),
         )
-        .unique(subset=["index_name", "company_id", "date_added"], keep="first")
+        .unique(subset=["index_name", "security_id", "entry_observed_by"], keep="first")
         .sort("company_id")
     )
 

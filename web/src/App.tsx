@@ -38,12 +38,14 @@ import { HealthView } from './views/HealthView';
 import { NotFoundView, PlaceholderView } from './views/PlaceholderView';
 import { OpportunitiesView } from './views/OpportunitiesView';
 import { StockDetailView } from './views/StockDetailView';
+import { ValidationView } from './views/ValidationView';
 
 
 /* ---------------------------------------------------------------- routing */
 
 const TITLES: ReadonlyArray<readonly [string, string]> = [
   ['/opportunities', 'Opportunities'],
+  ['/validation', 'Validation'],
   ['/health', 'Data health'],
   ['/today', 'Today'],
   ['/portfolio', 'Portfolio'],
@@ -243,6 +245,7 @@ function AppShell() {
             />
             <Route path="/stock" element={<Navigate to="/opportunities" replace />} />
             <Route path="/stock/:ticker" element={<StockRoute refreshToken={pipeline.finishedAt} />} />
+            <Route path="/validation" element={<ValidationView refreshToken={pipeline.finishedAt} />} />
             <Route
               path="/health"
               element={

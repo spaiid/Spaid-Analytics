@@ -17,6 +17,7 @@ import type {
   StatusResponse,
   StockDetail,
 } from './types';
+import type { TrialRegistry, ValidationReport } from './validation-types';
 
 /* --------------------------------------------------------------- errors */
 
@@ -130,6 +131,8 @@ export const apiPaths = {
   health: (): string => '/api/health',
   pipelineRun: (): string => '/api/pipeline/run',
   pipelineStatus: (): string => '/api/pipeline/status',
+  validation: (period?: string | null): string => `/api/validation${queryString({ period })}`,
+  validationTrials: (limit?: number): string => `/api/validation/trials${queryString({ limit })}`,
 };
 
 /* --------------------------------------------------------- typed helpers */
@@ -151,6 +154,14 @@ export function getStock(ticker: string, signal?: AbortSignal): Promise<StockDet
 
 export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return apiFetch<HealthResponse>(apiPaths.health(), { signal });
+}
+
+export function getValidation(period?: string | null, signal?: AbortSignal): Promise<ValidationReport> {
+  return apiFetch<ValidationReport>(apiPaths.validation(period), { signal });
+}
+
+export function getValidationTrials(limit?: number, signal?: AbortSignal): Promise<TrialRegistry> {
+  return apiFetch<TrialRegistry>(apiPaths.validationTrials(limit), { signal });
 }
 
 export function runPipeline(signal?: AbortSignal): Promise<PipelineStartResponse> {

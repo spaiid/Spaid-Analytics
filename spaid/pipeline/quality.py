@@ -245,23 +245,59 @@ def _check_share_count_plausibility() -> list[Warning_]:
 
 
 def _check_universe_membership_gap() -> list[Warning_]:
-    """The survivorship bias we know about and cannot yet remove."""
-    membership = store.read("universe_membership")
-    if membership is None or membership.is_empty():
-        return []
-    removed = membership.filter(pl.col("date_removed").is_not_null()).height
-    if removed > 0:
-        return []
+    """How much of the survivorship bias has actually been removed.
+
+    Reports a measurement rather than a caveat. There are three distinct states
+    and they mean very different things: no history at all, history with holes,
+    and history complete enough to support a claim.
+    """
+    from spaid.pipeline import security_master
+
+    coverage = security_master.coverage_report()
+    if not coverage.get("built"):
+        return [
+            Warning_(
+                "warning",
+                (
+                    "Index membership is current-only: the constituents source lists who is in "
+                    "the index today and when they joined, but not who was removed. Every "
+                    "historical ranking would therefore be drawn from the companies that "
+                    "survived to today, and any backtest over it is invalid as evidence of an "
+                    "edge. Run `spaid universe` to reconstruct membership from the source's "
+                    "revision history."
+                ),
+                "universe_membership",
+            )
+        ]
+
+    removed = int(coverage.get("removed_securities") or 0)
+    priced = int(coverage.get("removed_with_prices") or 0)
+    missing = removed - priced
+    if missing == 0:
+        return [
+            Warning_(
+                "info",
+                (
+                    f"Historical membership is reconstructed from "
+                    f"{coverage.get('snapshots')} monthly snapshots with "
+                    f"{coverage.get('exits_observed')} observed exits, and all {removed} removed "
+                    "companies are priced through their membership."
+                ),
+                "universe_membership",
+            )
+        ]
+
     return [
         Warning_(
-            "info",
+            "warning",
             (
-                "Index membership is current-only: the constituents source lists who is in the "
-                "index today and when they joined, but not who was removed. Entry dates prevent "
-                "trading a company before the index picked it, which removes half the "
-                "survivorship bias. The other half -- companies dropped after poor performance -- "
-                "cannot be recovered from this source, so historical results are optimistic by an "
-                "amount that cannot be measured here."
+                f"Survivorship bias is partly removed. Membership is reconstructed with "
+                f"{coverage.get('exits_observed')} observed index exits, and {priced} of "
+                f"{removed} removed companies have price history. The remaining {missing} were "
+                "acquired, merged or failed, and no free source carries their prices or their "
+                "delisting returns. Backtests are therefore biased upward by an amount that "
+                "cannot be measured from this data, and are labelled exploratory rather than "
+                "validated."
             ),
             "universe_membership",
         )
@@ -341,9 +377,17 @@ def _check_stale_filings() -> list[Warning_]:
     fundamentals = store.scan("fundamentals")
     if fundamentals is None:
         return []
+    # Former index members stopped filing because they were acquired or wound
+    # up. That is their history ending, not our data going stale, and flagging
+    # it would bury the companies whose filings really are late.
+    securities = store.read("securities")
+    scored = set(securities["company_id"].to_list()) if securities is not None else None
+
+    scan = fundamentals.filter(pl.col("concept") == "revenue")
+    if scored:
+        scan = scan.filter(pl.col("company_id").is_in(list(scored)))
     latest = (
-        fundamentals.filter(pl.col("concept") == "revenue")
-        .group_by("company_id")
+        scan.group_by("company_id")
         .agg(pl.col("available_at").max().alias("last"), pl.col("ticker").last())
         .collect()
     )

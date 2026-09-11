@@ -6,6 +6,10 @@ person at a terminal use the same code path the interface does.
     spaid ingest          fetch prices, filings, estimates
     spaid analyze         score and value the universe
     spaid run             both, in order
+    spaid universe        rebuild the historical universe and security master
+    spaid validate        run the validation protocol over a period
+    spaid holdout         open the sealed period (audited, deliberately awkward)
+    spaid trials          the trial registry, including the failures
     spaid serve           start the web interface
     spaid health          data-quality report
     spaid top             the ranked list, in the terminal
@@ -236,6 +240,137 @@ def cmd_explain(args) -> int:
     return 0
 
 
+def cmd_universe(args) -> int:
+    """Reconstruct index membership through time, then report the gaps."""
+    from spaid.pipeline import ingest, security_master
+
+    result = security_master.build()
+    if args.with_prices:
+        result["delisted_prices"] = ingest.refresh_delisted_prices()
+        result.update(security_master.build())
+
+    print(json.dumps(result, indent=2, default=str))
+
+    coverage = security_master.coverage_report()
+    removed = coverage.get("removed_securities") or 0
+    priced = coverage.get("removed_with_prices") or 0
+    print(
+        f"\nSurvivorship: {priced} of {removed} removed companies are priced. "
+        f"The other {removed - priced} were acquired, merged or failed and no free source "
+        "carries their history, so every backtest remains biased upward by an amount that "
+        "cannot be measured from this data."
+    )
+    return 0
+
+
+def cmd_validate(args) -> int:
+    """Run the whole validation protocol and print the verdict."""
+    from spaid.backtest import validate
+
+    result = validate.run_validation(
+        period_label=args.period,
+        with_robustness=not args.no_robustness,
+        purpose=args.purpose,
+    )
+    _print_verdict(result)
+    if args.json:
+        print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
+def cmd_holdout(args) -> int:
+    """Evaluate the sealed period. Requires a reason and writes an audit record."""
+    from spaid.backtest import validate
+
+    if not args.yes:
+        print(
+            "The holdout is sealed. Evaluating it is recorded permanently, and every "
+            "evaluation after the first weakens it as evidence because the strategy can be "
+            "adjusted in response to what was seen.\n"
+            "Re-run with --yes to proceed.",
+            file=sys.stderr,
+        )
+        return 2
+
+    result = validate.evaluate_holdout(reason=args.reason)
+    audit = result["holdout_audit"]
+    print(f"Holdout audit {audit['audit_id']} recorded.")
+    print(audit["warning"])
+    print()
+    _print_verdict(result)
+    return 0
+
+
+def cmd_trials(args) -> int:
+    """The trial registry, newest first."""
+    from spaid.api import validation_service
+
+    registry = validation_service.get_trials(limit=args.limit)
+    if not registry.trials:
+        print("No trials registered yet.")
+        return 0
+
+    print(f"{registry.n_trials} trials registered\n")
+    header = f"{'WHEN':12}{'PERIOD':14}{'NET CAGR':>10}{'vs SPY':>10}  PURPOSE"
+    print(header)
+    print("-" * len(header))
+    for trial in registry.trials:
+        cagr = f"{trial.net_cagr * 100:.2f}%" if trial.net_cagr is not None else "-"
+        excess = f"{trial.excess_vs_spy * 100:+.2f}%" if trial.excess_vs_spy is not None else "-"
+        print(
+            f"{trial.created_at:%Y-%m-%d}  {trial.period_label[:12]:14}{cagr:>10}{excess:>10}  "
+            f"{trial.purpose[:70]}"
+        )
+    print(f"\n{registry.note}")
+    return 0
+
+
+def _print_verdict(result: dict) -> None:
+    """The conclusion, its evidence and its limits, in the terminal."""
+    verdict = result["verdict"]
+    print()
+    print(f"Strategy   : {result['strategy_version']} ({result['config_checksum'][:12]})")
+    print(f"Period     : {result['period_label']} {result['period_start']} to {result['period_end']}")
+    print(f"Data       : {result['data_version']}  universe {result['universe_version']}")
+    print(f"Code       : {result['code_commit']}")
+    print()
+    print(f"STATUS     : {verdict['status']}")
+    print(f"CONCLUSION : {verdict['conclusion']}")
+    print(f"             {verdict['headline']}")
+    if verdict["reasoning"]:
+        print()
+        for line in verdict["reasoning"]:
+            print(f"  - {line}")
+
+    print("\nPortfolios (net of costs):")
+    for label, variant in result["variants"].items():
+        net = variant["net"]
+        spy = net["benchmarks"].get("SPY", {})
+        spmo = net["benchmarks"].get("SPMO", {})
+        marker = "*" if label == result["primary_variant"] else " "
+        print(
+            f" {marker}{label:12} CAGR {net['cagr'] * 100:6.2f}%  "
+            f"Sharpe {net['sharpe']:5.2f}  maxDD {net['max_drawdown'] * 100:6.1f}%  "
+            f"vs SPY {spy.get('excess_cagr', float('nan')) * 100:+6.2f}%  "
+            f"vs SPMO {spmo.get('excess_cagr', float('nan')) * 100:+6.2f}%"
+        )
+
+    ic = result["signal"]["information_coefficient"]
+    print("\nRank information coefficient:")
+    for horizon in sorted(ic, key=int):
+        entry = ic[horizon]
+        print(
+            f"  {horizon:>2}m  mean {entry['ic_mean']:+.4f}  t {entry['ic_t']:+.2f}  "
+            f"positive on {entry['hit_rate'] * 100:.0f}% of dates"
+        )
+
+    if verdict["limitations"]:
+        print("\nLimitations:")
+        for line in verdict["limitations"]:
+            print(f"  ! {line}")
+    print()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="spaid", description="Spaid Analytics - stock analysis and portfolio decisions"
@@ -259,6 +394,35 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--years", type=int, default=6)
     p.add_argument("--daily-days", type=int, default=30)
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("universe", help="rebuild historical index membership and the security master")
+    p.add_argument(
+        "--with-prices",
+        action="store_true",
+        help="also try to fetch prices for removed companies that are still listed",
+    )
+    p.set_defaults(func=cmd_universe)
+
+    p = sub.add_parser("validate", help="run the validation protocol over one period")
+    p.add_argument(
+        "--period",
+        default="development",
+        choices=["development", "validation", "full"],
+        help="which period to test; the holdout needs `spaid holdout`",
+    )
+    p.add_argument("--no-robustness", action="store_true", help="skip the robustness battery")
+    p.add_argument("--purpose", default="Frozen Strategy Version 1 baseline")
+    p.add_argument("--json", action="store_true", help="also print the full result")
+    p.set_defaults(func=cmd_validate)
+
+    p = sub.add_parser("holdout", help="evaluate the sealed holdout period (audited)")
+    p.add_argument("--reason", required=True, help="why the holdout is being opened; recorded permanently")
+    p.add_argument("--yes", action="store_true", help="confirm; without it the command refuses")
+    p.set_defaults(func=cmd_holdout)
+
+    p = sub.add_parser("trials", help="the trial registry, including failed experiments")
+    p.add_argument("-n", "--limit", type=int, default=50)
+    p.set_defaults(func=cmd_trials)
 
     p = sub.add_parser("serve", help="start the web interface")
     p.add_argument("--host", default="127.0.0.1")

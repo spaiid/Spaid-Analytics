@@ -144,9 +144,24 @@ class TestCrossSourceAgreement:
     """
 
     def test_share_count_agrees_with_earnings_per_share(self, fundamentals):
+        """Scoped to the companies the application actually scores.
+
+        The fundamentals table now also covers former index members, fetched so
+        that the backtest can rank the historical universe rather than today's
+        survivors. Their most recent filing can be years old, so their share
+        counts legitimately disagree with a stale earnings figure. Including
+        them would turn a check on the live universe into a check on data no
+        recommendation is ever built from.
+        """
+        current = store.read("securities")
+        if current is None or current.is_empty():
+            pytest.skip("no securities table")
+        scored = set(current["company_id"].to_list())
+
         latest = (
             fundamentals.filter(
                 pl.col("concept").is_in(["shares_diluted", "eps_diluted", "net_income"])
+                & pl.col("company_id").is_in(list(scored))
             )
             .sort("available_at")
             .group_by(["company_id", "concept"])

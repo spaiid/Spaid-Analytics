@@ -50,6 +50,16 @@ function StockIcon() {
   );
 }
 
+/** Validation: a check inside a shield. */
+function ValidationIcon() {
+  return (
+    <Glyph>
+      <path d="M8 1.8 2.8 4v4c0 3.2 2.2 5.3 5.2 6.2 3-0.9 5.2-3 5.2-6.2V4Z" />
+      <path d="M5.9 7.9 7.4 9.4l2.9-3" />
+    </Glyph>
+  );
+}
+
 /** Data health: a pulse. */
 function PulseIcon() {
   return (
@@ -178,6 +188,7 @@ export function Sidebar({ lastTicker, asOf, scoredCount, universeSize }: Sidebar
               }}
             />
           )}
+          <NavRow item={{ to: '/validation', label: 'Validation', icon: <ValidationIcon /> }} />
           <NavRow item={{ to: '/health', label: 'Data health', icon: <PulseIcon /> }} />
         </ul>
 
