@@ -39,10 +39,17 @@ from spaid.storage.schema import (
     coerce,
 )
 from spaid.valuation.engine import CompanyValuationInputs, value_company
+from spaid.valuation.relative import MULTIPLE_DRIVERS
 
 log = logging.getLogger(__name__)
 
 EPS = 1e-9
+
+# How far the filings' share count may sit from the provider's independent count
+# before the filing is treated as a units error rather than a different opinion.
+# Dual-class issuers differ here by design -- filings carry one class, the
+# provider carries the total -- but by a factor of two or three, not five.
+_SHARE_COUNT_DISAGREEMENT = 5.0
 
 
 def build_date_grid(
@@ -193,35 +200,128 @@ def build_metric_panel(
     snapshot = store.read("security_snapshot")
     if snapshot is not None and not snapshot.is_empty():
         snap = snapshot.select(
-            ["company_id", "shares_outstanding", "market_cap", "forward_pe", "spread_bps"]
+            [
+                "company_id",
+                "shares_outstanding",
+                "market_cap",
+                "price",
+                "forward_pe",
+                "spread_bps",
+            ]
         ).rename(
             {
                 "shares_outstanding": "_snap_shares",
                 "market_cap": "_snap_market_cap",
+                "price": "_snap_price",
                 "forward_pe": "_snap_forward_pe",
                 "spread_bps": "spread_bps",
             }
         )
         panel = panel.join(snap, on="company_id", how="left")
+
+        # The second provider is not only a gap-filler, it is the referee.
+        #
+        # Coalescing alone trusts the filing whenever it produced *a* number,
+        # including a wrong one. McDonald's tags its diluted share count in
+        # millions -- 711.1, not 711,100,000 -- so the filings market cap came
+        # out at $179,869 against a real $179bn, and MCD was published as one of
+        # the three cheapest companies in the index on every yield metric.
+        # Berkshire was out by 2,274x and Erie by 20,601x for the same reason.
+        #
+        # A scale error is unmistakable next to an independent measurement of
+        # the same quantity, so the two counts are compared and a disagreement
+        # beyond `_SHARE_COUNT_DISAGREEMENT` hands the decision to the provider.
+        # Dual-class issuers legitimately differ here -- the filings carry one
+        # class and the snapshot carries the total -- but by a factor of two or
+        # three, nowhere near this bound.
+        # The provider's own share count is not always the consolidated one --
+        # for Berkshire it is the Class B count against a Class A + B market
+        # capitalisation, so taking it literally understates the company by a
+        # third. Its market capitalisation divided by our price is consistent
+        # with both by construction, and reduces to the share count exactly for
+        # the single-class filers where the two already agree.
+        replacement = pl.coalesce(
+            pl.when((pl.col("_snap_price") > EPS) & (pl.col("_snap_market_cap") > 0))
+            .then(pl.col("_snap_market_cap") / pl.col("_snap_price"))
+            .otherwise(None),
+            pl.col("_snap_shares"),
+        )
+        panel = panel.with_columns(replacement.alias("_snap_shares_resolved"))
+
+        ratio = pl.col("shares_current_basis") / pl.col("_snap_shares_resolved")
+        implausible = (
+            pl.col("shares_current_basis").is_not_null()
+            & pl.col("_snap_shares_resolved").is_not_null()
+            & (pl.col("_snap_shares_resolved") > 0)
+            & (
+                (ratio > _SHARE_COUNT_DISAGREEMENT)
+                | (ratio < 1.0 / _SHARE_COUNT_DISAGREEMENT)
+            )
+        )
+        panel = panel.with_columns(implausible.alias("_shares_implausible"))
+
+        n_bad = int(
+            panel.filter(pl.col("_shares_implausible"))["company_id"].n_unique()
+        )
+        if n_bad:
+            log.warning(
+                "share count disagrees with the provider by more than %.0fx for %d "
+                "companies; using the provider count for those",
+                _SHARE_COUNT_DISAGREEMENT,
+                n_bad,
+            )
+
         panel = panel.with_columns(
-            pl.when(pl.col("market_cap").is_null() & pl.col("_snap_market_cap").is_not_null())
+            pl.when(pl.col("_shares_implausible"))
+            .then(pl.col("_snap_shares_resolved"))
+            .otherwise(
+                pl.coalesce(
+                    pl.col("shares_current_basis"), pl.col("_snap_shares_resolved")
+                )
+            )
+            .alias("shares_current_basis"),
+        ).with_columns(
+            pl.when(pl.col("_shares_implausible"))
+            .then(pl.lit("provider_snapshot_scale_check"))
+            .when(pl.col("market_cap").is_null() & pl.col("_snap_market_cap").is_not_null())
             .then(pl.lit("provider_snapshot"))
             .when(pl.col("market_cap").is_not_null())
             .then(pl.lit("filings"))
             .otherwise(pl.lit("unavailable"))
             .alias("market_cap_source"),
-            pl.coalesce(pl.col("market_cap"), pl.col("_snap_market_cap")).alias("market_cap"),
-            pl.coalesce(pl.col("shares_current_basis"), pl.col("_snap_shares")).alias(
-                "shares_current_basis"
-            ),
+            # Rebuilt from the corrected count rather than taken from the
+            # provider, so it stays on the same split basis as `close_raw`.
+            pl.when(pl.col("_shares_implausible"))
+            .then(pl.col("close_raw") * pl.col("shares_current_basis"))
+            .otherwise(pl.coalesce(pl.col("market_cap"), pl.col("_snap_market_cap")))
+            .alias("market_cap"),
             pl.coalesce(pl.col("forward_pe"), pl.col("_snap_forward_pe")).alias("forward_pe")
             if "forward_pe" in panel.columns
             else pl.col("_snap_forward_pe").alias("forward_pe"),
-        ).drop("_snap_shares", "_snap_market_cap", "_snap_forward_pe")
+        ).drop(
+            "_snap_shares",
+            "_snap_shares_resolved",
+            "_snap_market_cap",
+            "_snap_price",
+            "_snap_forward_pe",
+            "_shares_implausible",
+        )
     else:
         panel = panel.with_columns(
             pl.lit(None, dtype=pl.Float64).alias("spread_bps"),
             pl.lit("filings").alias("market_cap_source"),
+        )
+
+    # A negative forward price/earnings is not a cheap stock, it is a company
+    # expected to lose money, and the ratio has no meaning there. Left in, it
+    # sorts below every profitable company and takes the top percentile of the
+    # metric: Moderna scored 93.75 on it.
+    if "forward_pe" in panel.columns:
+        panel = panel.with_columns(
+            pl.when(pl.col("forward_pe") > EPS)
+            .then(pl.col("forward_pe"))
+            .otherwise(None)
+            .alias("forward_pe")
         )
 
     # Metrics that depend on the resolved market cap must be recomputed after
@@ -247,9 +347,9 @@ def _recompute_market_cap_metrics(panel: pl.DataFrame) -> pl.DataFrame:
             - c("cash_and_equivalents")
         ).alias("enterprise_value")
     ).with_columns(
-        sd(c("enterprise_value"), c("ebit"), positive_only=True).alias("ev_ebit"),
-        sd(c("enterprise_value"), c("ebitda"), positive_only=True).alias("ev_ebitda"),
-        sd(c("enterprise_value"), c("revenue"), positive_only=True).alias("ev_revenue"),
+        sd(c("enterprise_value"), c("ebit"), positive_only=True, numerator_positive=True).alias("ev_ebit"),
+        sd(c("enterprise_value"), c("ebitda"), positive_only=True, numerator_positive=True).alias("ev_ebitda"),
+        sd(c("enterprise_value"), c("revenue"), positive_only=True, numerator_positive=True).alias("ev_revenue"),
         sd(c("free_cash_flow"), c("market_cap"), positive_only=True).alias("fcf_yield"),
         sd(c("net_income"), c("market_cap"), positive_only=True).alias("earnings_yield"),
         sd(c("market_cap"), pl.coalesce(c("equity_incl_nci"), c("equity")), positive_only=True)
@@ -313,7 +413,17 @@ def build_valuations(
     rf = _risk_free_rate()
     log.info("valuing %d companies as of %s (risk-free %.2f%%)", today.height, as_of, rf * 100)
 
-    multiple_keys = ("ev_ebit", "ev_ebitda", "fcf_yield", "trailing_pe", "price_to_book", "forward_pe")
+    # Capital intensity is measured across the whole cross-section at once, so a
+    # company that cannot estimate its own can borrow its sector's median.
+    s2c_by_ticker = sales_to_capital_table(today)
+
+    # Every multiple the comparables engine knows how to use. Derived from
+    # `MULTIPLE_DRIVERS` rather than restated, because the two lists drifted:
+    # `ev_revenue` was missing here, so the one multiple the spec routes
+    # cyclicals and unprofitable-growth names towards was never available to
+    # them, and they were valued on the trough earnings multiples it exists to
+    # avoid.
+    multiple_keys = tuple(MULTIPLE_DRIVERS)
     hist = history if history is not None else panel
 
     records: list[dict] = []
@@ -372,7 +482,14 @@ def build_valuations(
             revenue_growth=row.get("revenue_growth_1y"),
             forward_eps_growth=row.get("forward_eps_growth"),
             forward_eps=row.get("forward_eps"),
-            sales_to_capital=_sales_to_capital(row),
+            sales_to_capital=s2c_by_ticker.get(row["ticker"]),
+            consensus_eps_this_year=row.get("consensus_eps_this_year"),
+            consensus_revenue_this_year=row.get("consensus_revenue_this_year"),
+            consensus_revenue_next_year=row.get("consensus_revenue_next_year"),
+            consensus_revenue_next_low=row.get("consensus_revenue_next_low"),
+            consensus_revenue_next_high=row.get("consensus_revenue_next_high"),
+            n_revenue_analysts=row.get("n_revenue_analysts"),
+            amortization_intangibles=row.get("amortization_intangibles"),
             beta=row.get("beta"),
             market_cap=row.get("market_cap"),
             risk_free_rate=rf,
@@ -413,6 +530,7 @@ def build_valuations(
                 "range_low": result.range_low,
                 "range_high": result.range_high,
                 "midpoint": result.midpoint,
+                "range_midpoint": result.range_midpoint,
                 "upside": result.upside,
                 "classification": result.classification,
                 "confidence": result.confidence,
@@ -457,13 +575,96 @@ def build_valuations(
     return df
 
 
-def _sales_to_capital(row: dict) -> float | None:
-    """Revenue per dollar of invested capital: how expensive growth is here."""
-    revenue, capital = row.get("revenue"), row.get("invested_capital")
-    if not revenue or not capital or capital <= 0:
-        return None
-    ratio = revenue / capital
-    return ratio if 0.1 < ratio < 20 else None
+# Bounds on any sales-to-capital estimate, wide enough to admit both a utility
+# and a software company but tight enough to exclude arithmetic accidents.
+_S2C_MIN = 0.1
+_S2C_MAX = 20.0
+
+# Revenue windows used to measure incremental capital intensity, longest first:
+# a longer window averages out the lumpiness of a single large plant or a year
+# with none.
+_S2C_WINDOWS = (("revenue__lag5y", 5), ("revenue__lag3y", 3), ("revenue__lag1y", 1))
+
+
+def _s2c_bounded(expr: pl.Expr) -> pl.Expr:
+    return pl.when(expr.is_between(_S2C_MIN, _S2C_MAX, closed="none")).then(expr)
+
+
+def sales_to_capital_table(today: pl.DataFrame) -> dict[str, float]:
+    """Revenue per dollar of *incremental* capital, by ticker.
+
+    The book ratio -- revenue over invested capital -- answers the wrong
+    question. Invested capital is the historic price of everything the company
+    has ever bought, including goodwill and intangibles from acquisitions that
+    are long since paid for. What the projection needs is the marginal cost of
+    the next dollar of revenue, and for an asset-light business the two bear no
+    relation: AMD carries $57bn of invested capital against $41bn of revenue, a
+    book ratio of 0.72, while actually spending $1.7bn of capital a year to add
+    $6bn of revenue. Feeding the book ratio into the model charges a fabless
+    chip designer 45% of its revenue every year to fund growth it buys for 4%,
+    which drives free cash flow negative for a decade and values a profitable
+    company at a fraction of its cash.
+
+    So the ratio is measured from what the company actually spent to grow --
+    capital expenditure plus cash paid for acquisitions -- across the longest
+    revenue window available. Where the company's own history cannot support
+    the estimate, because revenue shrank or nothing was spent, the sector's
+    median stands in: it is a worse estimate of this company, but it is at
+    least an estimate of the right quantity.
+    """
+    if today.is_empty():
+        return {}
+
+    # Cash spent to grow. Both terms are floored at zero: a year of net
+    # divestiture does not make growth cheaper.
+    spend = pl.col("capex").fill_null(0.0).clip(lower_bound=0.0) + pl.col(
+        "acquisitions"
+    ).fill_null(0.0).clip(lower_bound=0.0)
+
+    candidates = []
+    for lag_col, years in _S2C_WINDOWS:
+        if lag_col not in today.columns:
+            continue
+        delta = pl.col("revenue") - pl.col(lag_col)
+        denominator = years * spend
+        candidates.append(
+            _s2c_bounded(
+                pl.when((delta > 0) & (denominator > 0)).then(delta / denominator)
+            )
+        )
+
+    incremental = pl.coalesce(candidates) if candidates else pl.lit(None, dtype=pl.Float64)
+    book = _s2c_bounded(
+        pl.when((pl.col("revenue") > 0) & (pl.col("invested_capital") > 0)).then(
+            pl.col("revenue") / pl.col("invested_capital")
+        )
+    )
+
+    frame = today.with_columns(
+        incremental.alias("_s2c_incremental"), book.alias("_s2c_book")
+    )
+    sector = (
+        pl.col("_s2c_incremental").median().over("sector")
+        if "sector" in frame.columns
+        else pl.lit(None, dtype=pl.Float64)
+    )
+    frame = frame.with_columns(
+        pl.coalesce(
+            [pl.col("_s2c_incremental"), sector, pl.col("_s2c_book")]
+        ).alias("_s2c")
+    )
+
+    resolved = frame.select(["ticker", "_s2c"]).drop_nulls()
+    own = frame["_s2c_incremental"].drop_nulls().len()
+    log.info(
+        "sales-to-capital: %d of %d companies from their own reinvestment history, "
+        "%d resolved in total (median %.2f)",
+        own,
+        frame.height,
+        resolved.height,
+        resolved["_s2c"].median() or float("nan"),
+    )
+    return dict(zip(resolved["ticker"], resolved["_s2c"], strict=True))
 
 
 # ---------------------------------------------------------------------------
@@ -626,12 +827,19 @@ def _attach_confidence(
         scores.append(result.score)
         labels.append(result.label)
 
+    keep = [c for c in opportunity.columns if c != "n_analysts"] + ["n_analysts"]
     today = today.with_columns(
         pl.Series("confidence", scores), pl.Series("confidence_label", labels)
-    ).select(opportunity.columns)
+    ).select(keep)
 
-    other = opportunity.filter(pl.col("date") != as_of)
+    # Only the current date carries analyst coverage: the estimates provider has
+    # no history, so back-dated rows have nothing to record.
+    other = opportunity.filter(pl.col("date") != as_of).with_columns(
+        pl.lit(None, dtype=pl.Int32).alias("n_analysts")
+    )
     return coerce(
-        pl.concat([other, today], how="vertical_relaxed").sort(["date", "rank"]),
+        pl.concat([other, today.select(other.columns)], how="vertical_relaxed").sort(
+            ["date", "rank"]
+        ),
         OPPORTUNITY_SCORES,
     )

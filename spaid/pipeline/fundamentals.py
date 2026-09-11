@@ -428,6 +428,12 @@ SCALE_OUTLIER_FACTOR = 50.0
 # Below this many comparable facts there is nothing to compare against, so the
 # guard stays out of the way rather than rejecting sparse data.
 SCALE_MIN_NEIGHBOURS = 6
+# How many periods either side of a fact it is judged against, and the fewest
+# that make a side worth listening to. Deliberately local and two-sided: a
+# scale error is out of step with the periods before *and* after it, while a
+# company that changed size still agrees with one side.
+SCALE_SIDE_WINDOW = 4
+SCALE_MIN_SIDE = 3
 
 
 def reject_scale_outliers(facts: list[Fact]) -> tuple[list[Fact], list[Fact]]:
@@ -446,7 +452,14 @@ def reject_scale_outliers(facts: list[Fact]) -> tuple[list[Fact], list[Fact]]:
     it is wrong while still looking like a number.
 
     Comparison is against facts of a similar period length, because a quarterly
-    figure and an annual one legitimately differ by four.
+    figure and an annual one legitimately differ by four, and against nearby
+    periods rather than the whole history, because a company can legitimately
+    change size in a single step. AMD's amortisation of intangibles went from
+    $4m a quarter to $550m when it acquired Xilinx; measured against the median
+    of its entire history that is a 180x jump, so all twelve post-acquisition
+    figures were discarded as scale errors and the company's EBITDA was
+    understated by 4.4x for four years. Measured against the quarters either
+    side of them they are unremarkable.
     """
     if len(facts) < SCALE_MIN_NEIGHBOURS:
         return facts, []
@@ -468,23 +481,45 @@ def reject_scale_outliers(facts: list[Fact]) -> tuple[list[Fact], list[Fact]]:
     kept: list[Fact] = []
     rejected: list[Fact] = []
     for group in by_bucket.values():
-        magnitudes = [abs(f.value) for f in group if f.value]
-        if len(group) < SCALE_MIN_NEIGHBOURS or not magnitudes:
+        if len(group) < SCALE_MIN_NEIGHBOURS or not any(f.value for f in group):
             kept.extend(group)
             continue
-        magnitudes.sort()
-        median = magnitudes[len(magnitudes) // 2]
-        if median <= 0:
-            kept.extend(group)
-            continue
-        for f in group:
+
+        # Ordered by period so that "nearby" means nearby in time.
+        ordered = sorted(group, key=lambda f: f.end)
+
+        def out_of_scale(magnitude: float, side: list[float]) -> bool | None:
+            """Is `magnitude` the wrong size next to `side`? None if unknowable."""
+            usable = sorted(v for v in side if v > 0)
+            if len(usable) < SCALE_MIN_SIDE:
+                return None
+            median = usable[len(usable) // 2]
+            if median <= 0:
+                return None
+            return (
+                magnitude > median * SCALE_OUTLIER_FACTOR
+                or magnitude < median / SCALE_OUTLIER_FACTOR
+            )
+
+        for i, f in enumerate(ordered):
             magnitude = abs(f.value)
             # A genuine zero is meaningful (no buybacks this quarter); only
             # non-zero values are checked against the scale of their peers.
-            if magnitude > 0 and (
-                magnitude > median * SCALE_OUTLIER_FACTOR
-                or magnitude < median / SCALE_OUTLIER_FACTOR
-            ):
+            if magnitude <= 0:
+                kept.append(f)
+                continue
+
+            before = [abs(o.value) for o in ordered[max(0, i - SCALE_SIDE_WINDOW) : i]]
+            after = [abs(o.value) for o in ordered[i + 1 : i + 1 + SCALE_SIDE_WINDOW]]
+            verdicts = [
+                v
+                for v in (out_of_scale(magnitude, before), out_of_scale(magnitude, after))
+                if v is not None
+            ]
+            # Agreeing with either neighbourhood is enough to survive. A filing
+            # error agrees with neither; the first quarter after an acquisition
+            # agrees with the quarters that follow it.
+            if verdicts and all(verdicts):
                 rejected.append(f)
             else:
                 kept.append(f)

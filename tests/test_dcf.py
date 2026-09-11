@@ -11,6 +11,7 @@ be checked against closed-form arithmetic, so it is checked exactly.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import pytest
 
@@ -116,11 +117,29 @@ class TestProjection:
         per_share_gap = (a.equity_value - b.equity_value) / 1_000_000_000.0
         assert per_share_gap == pytest.approx(5.0)
 
-    def test_share_based_compensation_reduces_value(self):
-        """The cash statement adds it back; owners still paid for it."""
+    def test_share_based_compensation_is_not_charged_twice(self):
+        """The starting margin is GAAP, so the expense is already in it.
+
+        This test previously asserted the opposite -- that raising
+        `share_based_comp` lowers value while `operating_margin` is held fixed --
+        which is only true if the margin excludes the expense. It does not:
+        `operating_margin` derives from `OperatingIncomeLoss`, which ASC 718
+        requires to be net of stock compensation. Holding the margin constant
+        and charging more compensation against it is the double count, and it
+        valued CrowdStrike as though its operating margin were -25%.
+        """
         none = project(company(share_based_comp=0.0), BASE_SCENARIO, SPEC)
         heavy = project(company(share_based_comp=1_000_000_000.0), BASE_SCENARIO, SPEC)
-        assert heavy.value_per_share < none.value_per_share
+        assert heavy.value_per_share == pytest.approx(none.value_per_share)
+
+    def test_adding_back_compensation_raises_value(self):
+        """Turning the expense off is the non-GAAP view, and it is worth more."""
+        gaap = DcfSpec()
+        non_gaap = replace(gaap, treat_sbc_as_expense=False)
+        subject = company(share_based_comp=1_000_000_000.0)
+        charged = project(subject, BASE_SCENARIO, gaap)
+        added_back = project(subject, BASE_SCENARIO, non_gaap)
+        assert added_back.value_per_share > charged.value_per_share
 
     def test_minority_interest_and_preferred_rank_ahead_of_common(self):
         plain = project(company(), BASE_SCENARIO, SPEC)
@@ -315,3 +334,215 @@ class TestScenarioOrdering:
         )
         midpoint = SPEC.forecast_years // 2
         assert bull.years[midpoint].growth > bear.years[midpoint].growth
+
+
+class TestReinvestmentSanity:
+    """The projection must resemble the company it claims to be projecting.
+
+    Every check here exists because the model produced an indefensible number
+    that nothing caught: AMD valued at $5.54 against a $503.60 price, with a
+    negative enterprise value, a terminal share of -9753%, and a base case
+    worth less than its own bear case.
+    """
+
+    def test_a_projection_that_flips_reported_cash_flow_is_flagged(self):
+        """Reported +$8bn becoming -$14bn next year is an assumption error."""
+        subject = company(
+            revenue=41_000_000_000.0,
+            operating_margin=0.157,
+            growth_rate=0.40,
+            # The book ratio AMD's acquisition-inflated capital base produced.
+            sales_to_capital=0.8,
+            reported_free_cash_flow=8_400_000_000.0,
+        )
+        result = project(subject, BASE_SCENARIO, SPEC)
+        assert result.years[0].free_cash_flow < 0
+        assert result.contradicts_reported_fcf
+
+    def test_a_healthy_projection_is_not_flagged(self):
+        result = project(
+            company(reported_free_cash_flow=1_500_000_000.0), BASE_SCENARIO, SPEC
+        )
+        assert result.years[0].free_cash_flow > 0
+        assert not result.contradicts_reported_fcf
+
+    def test_a_modest_first_year_dip_is_not_a_contradiction(self):
+        """A genuinely investing business may dip; only a large swing counts."""
+        subject = company(
+            revenue=10_000_000_000.0,
+            operating_margin=0.02,
+            growth_rate=0.12,
+            sales_to_capital=1.2,
+            reported_free_cash_flow=10_000_000.0,
+        )
+        result = project(subject, BASE_SCENARIO, SPEC)
+        swing = (10_000_000.0 - result.years[0].free_cash_flow) / 10_000_000_000.0
+        if swing > SPEC.fcf_contradiction_threshold:
+            pytest.skip("fixture swung further than intended")
+        assert not result.contradicts_reported_fcf
+
+    def test_no_reported_figure_means_no_verdict(self):
+        result = project(company(reported_free_cash_flow=None), BASE_SCENARIO, SPEC)
+        assert not result.contradicts_reported_fcf
+
+    def test_a_worthless_operating_business_is_flagged_not_hidden_by_cash(self):
+        """Net cash can leave equity positive while the business values below zero."""
+        subject = company(
+            revenue=41_000_000_000.0,
+            operating_margin=0.13,
+            growth_rate=0.40,
+            sales_to_capital=0.8,
+            net_debt=-20_000_000_000.0,
+            beta=1.85,
+            roic=0.10,
+            market_cap=835_000_000_000.0,
+        )
+        result = project(subject, BASE_SCENARIO, SPEC)
+        assert result.enterprise_value < 0
+        assert result.enterprise_value_negative
+        assert result.equity_value > 0  # the cash pile, not the company
+        assert any("balance sheet" in w for w in result.warnings)
+
+    def test_terminal_share_is_undefined_rather_than_absurd(self):
+        """A ratio of a negative total is not a share of anything.
+
+        Reported as a number it reads 4.34, -97.53 and 3.22 for the three
+        scenarios of one company, and every `> 0.85` threshold test downstream
+        passes it silently.
+        """
+        subject = company(
+            revenue=41_000_000_000.0,
+            operating_margin=0.13,
+            growth_rate=0.40,
+            sales_to_capital=0.8,
+            net_debt=-20_000_000_000.0,
+            beta=1.85,
+            roic=0.10,
+            market_cap=835_000_000_000.0,
+        )
+        result = project(subject, BASE_SCENARIO, SPEC)
+        assert result.pv_explicit < 0
+        assert math.isnan(result.terminal_share)
+
+    def test_scenarios_stay_ordered_when_growth_is_cheap(self):
+        """Bear below base below bull, which inverted when growth cost too much."""
+        subject = company(growth_rate=0.30, sales_to_capital=3.3)
+        results = run_scenarios(subject, SPEC)
+        assert (
+            results["bear"].value_per_share
+            < results["base"].value_per_share
+            < results["bull"].value_per_share
+        )
+
+
+CONSENSUS = dict(
+    revenue=41_305_000_000.0,
+    operating_margin=0.157,
+    tax_rate=0.145,
+    shares=1_659_000_000.0,
+    growth_rate=0.40,
+    sales_to_capital=3.34,
+    consensus_revenue=(50_822_000_000.0, 87_737_000_000.0),
+    consensus_margins=(0.289, 0.345),
+    consensus_low_ratio=0.698,
+    consensus_high_ratio=1.323,
+    n_revenue_analysts=51,
+)
+
+
+class TestConsensusAnchoring:
+    """The projection has to describe the company the estimates describe.
+
+    Fading a trailing growth rate from a trailing margin produced $6.04 of
+    earnings per share for AMD against a consensus of $15.61, and that
+    projection then set the fair value at a seventh of the share price.
+    """
+
+    def test_the_near_term_path_is_consensus_revenue(self):
+        result = project(company(**CONSENSUS), BASE_SCENARIO, SPEC)
+        assert result.years[0].revenue == pytest.approx(50_822_000_000.0)
+        assert result.years[1].revenue == pytest.approx(87_737_000_000.0)
+
+    def test_the_projection_reproduces_consensus_earnings(self):
+        """The point of anchoring: the model's own output matches the input."""
+        result = project(company(**CONSENSUS), BASE_SCENARIO, SPEC)
+        shares = CONSENSUS["shares"]
+        assert result.years[0].nopat / shares == pytest.approx(7.57, abs=0.05)
+        assert result.years[1].nopat / shares == pytest.approx(15.61, abs=0.05)
+
+    def test_growth_continues_from_consensus_rather_than_restarting(self):
+        """Year three must not revert to the trailing rate."""
+        result = project(company(**CONSENSUS), BASE_SCENARIO, SPEC)
+        assert result.years[2].revenue > result.years[1].revenue
+        # Fading, not accelerating, once consensus runs out.
+        assert result.years[2].growth < result.years[1].growth
+
+    def test_the_margin_holds_where_consensus_left_it(self):
+        result = project(company(**CONSENSUS), BASE_SCENARIO, SPEC)
+        assert result.years[1].margin == pytest.approx(0.345)
+        assert result.years[2].margin == pytest.approx(0.345, abs=0.01)
+
+    def test_scenarios_take_the_analyst_range_not_a_multiplier(self):
+        results = run_scenarios(company(**CONSENSUS), SPEC)
+        low = CONSENSUS["consensus_revenue"][1] * CONSENSUS["consensus_low_ratio"]
+        high = CONSENSUS["consensus_revenue"][1] * CONSENSUS["consensus_high_ratio"]
+        assert results["bear"].years[1].revenue == pytest.approx(low, rel=1e-6)
+        assert results["bull"].years[1].revenue == pytest.approx(high, rel=1e-6)
+        assert (
+            results["bear"].value_per_share
+            < results["base"].value_per_share
+            < results["bull"].value_per_share
+        )
+
+    def test_thin_coverage_is_not_a_consensus(self):
+        """Two analysts are one opinion; the model keeps its own assumptions."""
+        thin = project(
+            company(**{**CONSENSUS, "n_revenue_analysts": 2}), BASE_SCENARIO, SPEC
+        )
+        assert thin.years[0].revenue != pytest.approx(50_822_000_000.0)
+        assert not thin.assumptions["anchored_to_consensus"]
+
+    def test_no_estimates_leaves_the_model_alone(self):
+        plain = project(company(), BASE_SCENARIO, SPEC)
+        assert not plain.assumptions["anchored_to_consensus"]
+
+    def test_a_consensus_implying_contraction_is_ignored(self):
+        """Anchoring to a path below today's revenue is not an improvement."""
+        shrinking = project(
+            company(
+                **{
+                    **CONSENSUS,
+                    "consensus_revenue": (30_000_000_000.0, 25_000_000_000.0),
+                    "consensus_margins": (0.15, 0.15),
+                }
+            ),
+            BASE_SCENARIO,
+            SPEC,
+        )
+        assert not shrinking.assumptions["anchored_to_consensus"]
+
+    def test_an_absurd_implied_margin_is_capped_and_flagged(self):
+        result = project(
+            company(**{**CONSENSUS, "consensus_margins": (0.289, 0.85)}),
+            BASE_SCENARIO,
+            SPEC,
+        )
+        ceiling = CONSENSUS["operating_margin"] + SPEC.consensus_margin_cap_pp
+        assert result.years[1].margin == pytest.approx(ceiling)
+        assert any("too far to take at face value" in w for w in result.warnings)
+
+    def test_a_missing_margin_falls_back_rather_than_guessing(self):
+        """Revenue without earnings cannot set a margin, so neither is used."""
+        result = project(
+            company(**{**CONSENSUS, "consensus_margins": (0.289, None)}),
+            BASE_SCENARIO,
+            SPEC,
+        )
+        assert result.years[1].margin == pytest.approx(
+            CONSENSUS["operating_margin"], abs=0.02
+        )
+
+    def test_anchoring_is_recorded_in_the_assumptions(self):
+        result = project(company(**CONSENSUS), BASE_SCENARIO, SPEC)
+        assert result.assumptions["anchored_to_consensus"]
+        assert result.assumptions["consensus_years"] == 2

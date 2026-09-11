@@ -188,8 +188,8 @@ export function OpportunitiesTable({
       {
         key: 'upside',
         header: 'Upside',
-        title: 'Upside to the fair-value midpoint, as the API computed it.',
-        sortLabel: 'upside to the fair-value midpoint',
+        title: 'Upside to the blended fair value, as the API computed it.',
+        sortLabel: 'upside to the blended fair value',
         numeric: true,
         width: '86px',
         sortValue: (row) => row.upside,

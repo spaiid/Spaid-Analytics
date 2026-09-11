@@ -134,8 +134,11 @@ export interface FairValue {
   bull: number | null;
   range_low: number | null;
   range_high: number | null;
+  /** The headline estimate: the weight-blended base case. */
   midpoint: number | null;
-  /** Fraction to the midpoint, not a percentage. */
+  /** Centre of the bear-bull range; not the estimate. */
+  range_midpoint: number | null;
+  /** Fraction to the blended estimate, not a percentage. */
   upside: number | null;
   classification: string;
   classification_label: string;
@@ -244,7 +247,7 @@ export interface OpportunityRow {
   valuation_class: string | null;
   valuation_label: string | null;
   valuation_label_short: string | null;
-  /** Fraction to the fair-value midpoint. */
+  /** Fraction to the blended fair value. */
   upside: number | null;
   fair_value_low: number | null;
   fair_value_high: number | null;

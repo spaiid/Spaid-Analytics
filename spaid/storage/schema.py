@@ -592,8 +592,12 @@ VALUATIONS = TableSpec(
         "bull": pl.Float64,
         "range_low": pl.Float64,
         "range_high": pl.Float64,
+        # The headline estimate: the weight-blended base case.
         "midpoint": pl.Float64,
-        "upside": pl.Float64,  # to midpoint, as a fraction
+        # The arithmetic centre of the bear-bull range, which is a different and
+        # systematically higher number. Reported, never decided on.
+        "range_midpoint": pl.Float64,
+        "upside": pl.Float64,  # to the blended estimate, as a fraction
         "classification": pl.Utf8,
         "confidence": pl.Float64,
         "confidence_label": pl.Utf8,

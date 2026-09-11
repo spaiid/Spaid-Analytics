@@ -82,7 +82,7 @@ export function RangeBar({
       ['Bull', isNum(bull) ? valueFormat(bull) : DASH],
       ['Range low', isNum(rangeLow) ? valueFormat(rangeLow) : DASH],
       ['Range high', isNum(rangeHigh) ? valueFormat(rangeHigh) : DASH],
-      ['Midpoint', isNum(midpoint) ? valueFormat(midpoint) : DASH],
+      ['Fair value', isNum(midpoint) ? valueFormat(midpoint) : DASH],
     ],
   };
 

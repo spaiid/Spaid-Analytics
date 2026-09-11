@@ -179,7 +179,13 @@ class TestStockDetail:
             pytest.skip("no valuation available for this company")
         assert fv["range_low"] is not None and fv["range_high"] is not None
         assert fv["range_low"] <= fv["base"] <= fv["range_high"]
-        assert fv["midpoint"] == pytest.approx((fv["range_low"] + fv["range_high"]) / 2)
+        # The headline is the weighted blend, not the centre of the range: the
+        # centre of an asymmetric range sits above the estimate the methods
+        # actually produced. Both are served, and they are different numbers.
+        assert fv["midpoint"] == pytest.approx(fv["base"])
+        assert fv["range_midpoint"] == pytest.approx(
+            (fv["range_low"] + fv["range_high"]) / 2
+        )
         assert fv["classification_label"]
 
     def test_skipped_valuation_methods_say_why(self, client, ticker):

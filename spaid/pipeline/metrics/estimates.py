@@ -123,6 +123,75 @@ def consensus_drift(
     )
 
 
+def consensus_revenue(estimates: pl.DataFrame, *, min_analysts: int = 3) -> pl.DataFrame:
+    """Consensus revenue for the current and next fiscal year, with its spread.
+
+    The discounted cash-flow model projects revenue, so revenue estimates are
+    the input that can actually anchor it. Earnings estimates cannot: they are
+    a margin assumption bundled with a revenue assumption, and the model needs
+    the two separately.
+
+    The low and high are carried because the spread is the honest scenario
+    range. For AMD the next-year consensus was $87.7bn against a low of $61.3bn
+    and a high of $116.1bn, and inventing a bear case by multiplying the
+    midpoint by 0.55 describes the model's own habits rather than what the
+    people covering the company actually disagree about.
+    """
+    empty = pl.DataFrame(
+        schema={
+            "company_id": pl.Utf8,
+            "consensus_revenue_this_year": pl.Float64,
+            "consensus_revenue_next_year": pl.Float64,
+            "consensus_revenue_next_low": pl.Float64,
+            "consensus_revenue_next_high": pl.Float64,
+            "n_revenue_analysts": pl.Int32,
+        }
+    )
+    if estimates.is_empty():
+        return empty
+
+    as_of = estimates["as_of"].max()
+    sub = estimates.filter((pl.col("as_of") == as_of) & (pl.col("metric") == "revenue"))
+    if sub.is_empty():
+        return empty
+
+    this_year = sub.filter(pl.col("period") == "0y").select(
+        ["company_id", pl.col("consensus").alias("consensus_revenue_this_year")]
+    )
+    next_year = sub.filter(pl.col("period") == "+1y").select(
+        [
+            "company_id",
+            pl.col("consensus").alias("consensus_revenue_next_year"),
+            pl.col("low").alias("consensus_revenue_next_low"),
+            pl.col("high").alias("consensus_revenue_next_high"),
+            pl.col("n_analysts").alias("n_revenue_analysts"),
+        ]
+    )
+
+    out = next_year.join(this_year, on="company_id", how="full", coalesce=True)
+    thin = pl.col("n_revenue_analysts").fill_null(0) < min_analysts
+    return out.with_columns(
+        *[
+            pl.when(thin).then(None).otherwise(pl.col(c)).alias(c)
+            for c in (
+                "consensus_revenue_this_year",
+                "consensus_revenue_next_year",
+                "consensus_revenue_next_low",
+                "consensus_revenue_next_high",
+            )
+        ]
+    ).select(
+        [
+            "company_id",
+            "consensus_revenue_this_year",
+            "consensus_revenue_next_year",
+            "consensus_revenue_next_low",
+            "consensus_revenue_next_high",
+            "n_revenue_analysts",
+        ]
+    )
+
+
 def forward_growth(estimates: pl.DataFrame, *, min_analysts: int = 3) -> pl.DataFrame:
     """Consensus next-year earnings growth, where coverage is thick enough.
 
@@ -135,6 +204,7 @@ def forward_growth(estimates: pl.DataFrame, *, min_analysts: int = 3) -> pl.Data
             "company_id": pl.Utf8,
             "forward_eps_growth": pl.Float64,
             "forward_eps": pl.Float64,
+            "consensus_eps_this_year": pl.Float64,
             "n_analysts": pl.Int32,
         }
     )
@@ -150,7 +220,11 @@ def forward_growth(estimates: pl.DataFrame, *, min_analysts: int = 3) -> pl.Data
         ["company_id", "consensus", "growth", "n_analysts"]
     ).rename({"consensus": "forward_eps", "growth": "_growth"})
     this_year = sub.filter(pl.col("period") == "0y").select(
-        ["company_id", pl.col("consensus").alias("_this_year")]
+        [
+            "company_id",
+            pl.col("consensus").alias("_this_year"),
+            pl.col("consensus").alias("consensus_eps_this_year"),
+        ]
     )
 
     return (
@@ -173,7 +247,15 @@ def forward_growth(estimates: pl.DataFrame, *, min_analysts: int = 3) -> pl.Data
             .otherwise(None)
             .alias("forward_eps"),
         )
-        .select(["company_id", "forward_eps_growth", "forward_eps", "n_analysts"])
+        .select(
+            [
+                "company_id",
+                "forward_eps_growth",
+                "forward_eps",
+                "consensus_eps_this_year",
+                "n_analysts",
+            ]
+        )
     )
 
 
@@ -340,6 +422,7 @@ def build_estimate_metrics(
         revision_balance(estimates, as_of=as_of),
         consensus_drift(estimates),
         forward_growth(estimates),
+        consensus_revenue(estimates),
         earnings_surprise(events, as_of=as_of),
         next_earnings(events, as_of=as_of),
         post_earnings_drift(events, prices, securities, as_of=as_of),
@@ -352,11 +435,17 @@ def build_estimate_metrics(
         "eps_revision_3m", "revenue_revision_3m", "forward_eps_growth", "forward_eps",
         "n_analysts", "earnings_surprise", "surprise_hit_rate", "next_earnings_date",
         "days_to_earnings", "post_earnings_drift", "last_earnings_date",
+        "consensus_eps_this_year",
+        "consensus_revenue_this_year", "consensus_revenue_next_year",
+        "consensus_revenue_next_low", "consensus_revenue_next_high",
+        "n_revenue_analysts",
     ]
     for col in expected:
         if col not in out.columns:
             dtype = pl.Date if col.endswith("_date") else (
-                pl.Int32 if col in ("n_analysts", "days_to_earnings") else pl.Float64
+                pl.Int32
+                if col in ("n_analysts", "days_to_earnings", "n_revenue_analysts")
+                else pl.Float64
             )
             out = out.with_columns(pl.lit(None, dtype=dtype).alias(col))
 

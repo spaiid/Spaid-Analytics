@@ -549,6 +549,7 @@ def _fair_value(company_id: str) -> S.FairValue | None:
         range_low=v.get("range_low"),
         range_high=v.get("range_high"),
         midpoint=v.get("midpoint"),
+        range_midpoint=v.get("range_midpoint"),
         upside=v.get("upside"),
         classification=v.get("classification") or "insufficient_confidence",
         classification_label=VALUATION_CLASS_LABELS.get(

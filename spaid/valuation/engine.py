@@ -74,6 +74,11 @@ class MethodOutcome:
     reason: str | None = None
     detail: str = ""
     assumptions: dict = field(default_factory=dict)
+    # Where a method can express its own uncertainty -- the spread of the peer
+    # group, for instance -- it reports it here, so a lone method still has a
+    # defensible range instead of a decorative one.
+    value_low: float | None = None
+    value_high: float | None = None
 
 
 @dataclass
@@ -84,7 +89,11 @@ class ValuationResult:
     bull: float | None = None
     range_low: float | None = None
     range_high: float | None = None
+    # The headline estimate: the weight-blended base case. Named `midpoint` for
+    # the schema's sake, but it is no longer the centre of the range -- see
+    # `range_midpoint` for that, and the note where both are assigned.
     midpoint: float | None = None
+    range_midpoint: float | None = None
     upside: float | None = None
     classification: str = ValuationClass.INSUFFICIENT_CONFIDENCE
     classification_label: str = CLASS_LABELS[ValuationClass.INSUFFICIENT_CONFIDENCE]
@@ -142,6 +151,15 @@ class CompanyValuationInputs:
     forward_eps_growth: float | None = None
     forward_eps: float | None = None
     sales_to_capital: float | None = None
+    consensus_eps_this_year: float | None = None
+    consensus_revenue_this_year: float | None = None
+    consensus_revenue_next_year: float | None = None
+    consensus_revenue_next_low: float | None = None
+    consensus_revenue_next_high: float | None = None
+    n_revenue_analysts: int | None = None
+    # Needed to restate consensus (non-GAAP) earnings onto the GAAP basis the
+    # projection runs on -- see `_consensus_path`.
+    amortization_intangibles: float | None = None
     beta: float | None = None
     market_cap: float | None = None
     risk_free_rate: float | None = None
@@ -182,11 +200,82 @@ def _growth_estimate(inputs: CompanyValuationInputs) -> float:
     return max(min(blended, 0.40), -0.25)
 
 
+def _consensus_path(
+    inputs: CompanyValuationInputs,
+) -> tuple[tuple[float, ...], tuple[float | None, ...], float, float]:
+    """The consensus revenue path, the margin it implies each year, and its spread.
+
+    Returns empty when coverage is too thin or the estimates do not describe
+    growth, which leaves the projection on its own trailing assumptions.
+    """
+    pairs = [
+        (inputs.consensus_revenue_this_year, inputs.consensus_eps_this_year),
+        (inputs.consensus_revenue_next_year, inputs.forward_eps),
+    ]
+    levels: list[float] = []
+    margins: list[float | None] = []
+
+    tax = inputs.tax_rate if inputs.tax_rate is not None else 0.21
+    tax = min(max(tax, 0.0), 0.60)
+
+    # Consensus earnings are quoted non-GAAP, and the projection is GAAP.
+    #
+    # Analysts publish adjusted earnings: the two items almost every company
+    # excludes are amortisation of acquired intangibles and share-based
+    # compensation. The projection starts from `OperatingIncomeLoss`, which
+    # charges both. Reading a non-GAAP margin onto a GAAP projection therefore
+    # grants a margin expansion that is purely a change of accounting basis --
+    # for AMD it lifted 15.71% to 34.42% and held it for eight years, worth over
+    # half the fair value, and it silently undid the model's own decision to
+    # treat stock compensation as a cost.
+    #
+    # Restating the implied margin back onto a GAAP basis is the correction. It
+    # is partial by construction, since a given company's adjustments may
+    # include restructuring or litigation the filings do not separate, but it
+    # removes the two that are large, universal and separately reported.
+    addback_ratio = 0.0
+    if inputs.revenue and inputs.revenue > 0:
+        addbacks = (inputs.amortization_intangibles or 0.0) + (
+            inputs.share_based_comp or 0.0
+        )
+        if math.isfinite(addbacks) and addbacks > 0:
+            addback_ratio = addbacks / inputs.revenue
+
+    for revenue, eps in pairs:
+        if revenue is None or not math.isfinite(revenue) or revenue <= 0:
+            break
+        levels.append(revenue)
+        # The margin consensus earnings imply on that revenue. Earnings are
+        # after interest and tax, so they are grossed back up to an operating
+        # figure; net interest is left out because its sign differs by company
+        # and the error is small next to the margin change being measured.
+        margin = None
+        if eps and inputs.shares and math.isfinite(eps):
+            candidate = (eps * inputs.shares) / (1.0 - tax) / revenue
+            candidate -= addback_ratio
+            if math.isfinite(candidate) and 0.0 < candidate < 0.90:
+                margin = candidate
+        margins.append(margin)
+
+    if not levels or not inputs.revenue or inputs.revenue <= 0:
+        return (), (), 1.0, 1.0
+
+    far = levels[-1]
+    low_ratio = high_ratio = 1.0
+    if inputs.consensus_revenue_next_low and far > EPS:
+        low_ratio = min(max(inputs.consensus_revenue_next_low / far, 0.4), 1.0)
+    if inputs.consensus_revenue_next_high and far > EPS:
+        high_ratio = min(max(inputs.consensus_revenue_next_high / far, 1.0), 2.5)
+
+    return tuple(levels), tuple(margins), low_ratio, high_ratio
+
+
 def _run_dcf(inputs: CompanyValuationInputs, spec: ValuationSpec) -> tuple[dict, list, list]:
     """Returns (scenario results, scenario dicts, sensitivity rows)."""
     if not inputs.shares or not inputs.revenue or inputs.operating_margin is None:
         return {}, [], []
 
+    consensus_levels, consensus_margins, low_ratio, high_ratio = _consensus_path(inputs)
     dcf_inputs = DcfInputs(
         revenue=inputs.revenue,
         operating_margin=inputs.operating_margin,
@@ -202,6 +291,12 @@ def _run_dcf(inputs: CompanyValuationInputs, spec: ValuationSpec) -> tuple[dict,
         beta=inputs.beta or 1.0,
         market_cap=inputs.market_cap,
         risk_free_rate=inputs.risk_free_rate,
+        reported_free_cash_flow=inputs.free_cash_flow,
+        consensus_revenue=consensus_levels,
+        consensus_low_ratio=low_ratio,
+        consensus_high_ratio=high_ratio,
+        consensus_margins=consensus_margins,
+        n_revenue_analysts=inputs.n_revenue_analysts,
     )
     results = run_scenarios(dcf_inputs, spec.dcf, risk_free=inputs.risk_free_rate)
     probabilities = {s.label: s.probability for s in spec.dcf.scenarios}
@@ -296,8 +391,6 @@ def value_company(
 
         if method is ValuationMethod.DCF:
             dcf_results, scenarios, sens = _run_dcf(inputs, spec)
-            result.scenarios = scenarios
-            result.sensitivities = sens
             base = dcf_results.get("base")
             if base is not None and math.isfinite(base.value_per_share):
                 outcome.value_per_share = base.value_per_share
@@ -308,10 +401,37 @@ def value_company(
                 )
                 outcome.assumptions = base.assumptions
                 caveats.extend(base.warnings)
+                # Two ways the projection can be arithmetically fine and still
+                # not be about this company. Both are assumption failures, not
+                # findings, so the method is withdrawn rather than blended in
+                # at half weight -- and withdrawn here, with a reason that says
+                # what went wrong, rather than later by the price-ratio guard,
+                # which can only say the answer looked odd.
+                if base.contradicts_reported_fcf:
+                    outcome.used = False
+                    outcome.reason = (
+                        "the projection contradicts the free cash flow the company actually "
+                        "reported, so its reinvestment assumption cannot be trusted"
+                    )
+                elif base.enterprise_value_negative:
+                    outcome.used = False
+                    outcome.reason = (
+                        "the projection values the operating business at or below zero, "
+                        "leaving only the balance sheet"
+                    )
             else:
                 outcome.reason = (
                     "not enough of revenue, operating margin and share count to project cash flows"
                 )
+
+            # The scenario and sensitivity tables belong to a model that ran.
+            # Publishing them for one the engine threw away put per-share values
+            # like -$69,244,078.63 on McDonald's page, under the same Bear/Base/
+            # Bull headings the range bar uses, and let a discarded model's
+            # sensitivity cut the valuation's confidence by 40%.
+            if outcome.used:
+                result.scenarios = scenarios
+                result.sensitivities = sens
 
         elif method is ValuationMethod.COMPARABLES:
             rel = relative.comparables_value(
@@ -326,11 +446,23 @@ def value_company(
                 outcome.value_per_share = rel.value_per_share
                 outcome.used = True
                 outcome.detail = rel.detail
+                outcome.value_low = rel.value_low
+                outcome.value_high = rel.value_high
                 outcome.assumptions = {
                     "multiple": rel.multiple_used,
                     "peer_multiple": rel.peer_multiple,
                     "peer_count": rel.peer_count,
                     "quality_adjustment": rel.adjustment,
+                    "multiples_blended": [
+                        {
+                            "multiple": c["multiple"],
+                            "label": c["label"],
+                            "peer_multiple": c["peer_multiple"],
+                            "peer_count": c["peer_count"],
+                            "value_per_share": c["value_per_share"],
+                        }
+                        for c in rel.components
+                    ],
                 }
             else:
                 outcome.reason = rel.detail or "no usable peer multiple"
@@ -446,6 +578,14 @@ def value_company(
     result.methods = outcomes
     used = [o for o in outcomes if o.used and o.value_per_share is not None]
 
+    # The price-ratio guard above can withdraw the DCF *after* its scenario and
+    # sensitivity tables were attached, so the check has to be repeated once
+    # every guard has had its say. Publishing them anyway is how a rejected
+    # projection still put a -$69,244,078.63 base case on a stock page.
+    if not any(o.method == ValuationMethod.DCF.value and o.used for o in outcomes):
+        result.scenarios = []
+        result.sensitivities = []
+
     if not used:
         result.caveats = _dedupe(
             caveats + ["no valuation method could run on the available data"]
@@ -458,9 +598,15 @@ def value_company(
     base_value = sum(o.value_per_share * o.weight for o in used) / total_weight
 
     # --- disagreement between methods --------------------------------------
+    # With one method there is no disagreement to measure, and recording zero
+    # would be indistinguishable from several methods agreeing perfectly --
+    # which is the opposite situation. None means "unknown", and every consumer
+    # has to decide what to do about that rather than reading a confident zero.
     values = np.array([o.value_per_share for o in used], dtype=float)
     dispersion = (
-        float(np.std(values) / abs(base_value)) if len(values) > 1 and abs(base_value) > EPS else 0.0
+        float(np.std(values) / abs(base_value))
+        if len(values) > 1 and abs(base_value) > EPS
+        else None
     )
     result.method_dispersion = dispersion
 
@@ -491,12 +637,33 @@ def value_company(
                     "by a range derived from how much the valuation methods disagree"
                 )
 
+    # A single method that can express its own uncertainty should be believed
+    # over any fixed percentage. For comparables that uncertainty is the spread
+    # of the peer group, which is a real measurement of how much defensible
+    # answers differ, rather than a band chosen to look like a range.
+    if (bear is None or bull is None) and len(used) == 1:
+        lone = used[0]
+        if (
+            lone.value_low is not None
+            and lone.value_high is not None
+            and math.isfinite(lone.value_low)
+            and math.isfinite(lone.value_high)
+            and lone.value_low < lone.value_high
+        ):
+            bear, bull = lone.value_low, lone.value_high
+
     if bear is None or bull is None:
-        # Without usable scenario machinery, widen by the methods' own
-        # disagreement, floored so the range is never implausibly tight.
-        spread = min(max(dispersion, 0.20), 0.60)
+        # Nothing measured the uncertainty, so it has to be asserted. The floor
+        # is wider when only one method ran: a lone estimate is less certain
+        # than a blend, and the range is the only place that can show.
+        floor = 0.20 if len(used) > 1 else 0.35
+        spread = min(max(dispersion or 0.0, floor), 0.60)
         bear = base_value * (1.0 - spread)
         bull = base_value * (1.0 + spread)
+        caveats.append(
+            "the fair-value range is a generic band, not a measured one: no method could "
+            "express its own uncertainty"
+        )
 
     # Methods disagreeing widens the range: their spread is real uncertainty, so
     # the range must at least span every method that ran. It should not extend
@@ -517,10 +684,20 @@ def value_company(
 
     result.bear, result.base, result.bull = bear, base_value, bull
     result.range_low, result.range_high = bear, bull
-    result.midpoint = (bear + bull) / 2.0
-    result.upside = (
-        (result.midpoint / inputs.price - 1.0) if inputs.price > EPS else None
-    )
+
+    # The headline estimate is the weighted blend, not the centre of the range.
+    #
+    # These are not the same number and the difference is not noise. Value
+    # compounds, so a bull case sits further above the base than the bear case
+    # sits below it, and the arithmetic midpoint of an asymmetric range is
+    # therefore biased upward: it exceeded the blend for 402 of 495 companies,
+    # by a mean of 10.3%. Reporting it flipped the sign of the upside for 42
+    # names and made 89 verdicts one bucket more bullish than the methods
+    # supported. `midpoint` is kept as the geometric centre of the range, which
+    # is what it always was, but nothing is decided on it.
+    result.midpoint = base_value
+    result.range_midpoint = (bear + bull) / 2.0
+    result.upside = (base_value / inputs.price - 1.0) if inputs.price > EPS else None
 
     # --- confidence ---------------------------------------------------------
     confidence, confidence_notes = _valuation_confidence(
@@ -595,7 +772,7 @@ def classify(
 def _valuation_confidence(
     inputs: CompanyValuationInputs,
     used: list[MethodOutcome],
-    dispersion: float,
+    dispersion: float | None,
     result: ValuationResult,
     spec: ValuationSpec,
     dcf_results: dict,
@@ -616,6 +793,11 @@ def _valuation_confidence(
             f"only one valuation method could run ({used[0].label}), so there is no "
             "cross-check on the estimate"
         )
+    elif dispersion is None:
+        # Several methods ran but the blend came out at nothing, so their
+        # disagreement cannot be expressed as a fraction of it.
+        score *= 0.70
+        notes.append("the methods could not be compared against a meaningful base case")
     elif dispersion > 0.50:
         score *= 0.55
         notes.append(
@@ -663,10 +845,19 @@ def _valuation_confidence(
         elif worst > 0.50:
             score *= 0.80
 
-    # Terminal-value dependence.
+    # Terminal-value dependence. An undefined terminal share is not a missing
+    # reading to be skipped over -- it is the signature of a projection that
+    # discounted to nothing, and the threshold tests below would all pass it
+    # silently if it were allowed through as a number.
     base_dcf = dcf_results.get("base")
-    if base_dcf is not None and math.isfinite(base_dcf.terminal_share):
-        if base_dcf.terminal_share > 0.85:
+    if base_dcf is not None:
+        if not math.isfinite(base_dcf.terminal_share):
+            score *= 0.60
+            notes.append(
+                "the cash-flow projection was degenerate -- it valued the operating business "
+                "at or below zero -- so it could not be used"
+            )
+        elif base_dcf.terminal_share > 0.85:
             score *= 0.70
             notes.append(
                 f"{base_dcf.terminal_share:.0%} of the discounted value sits beyond the "

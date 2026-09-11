@@ -110,8 +110,15 @@ class FairValue(BaseModel):
     bull: float | None = None
     range_low: float | None = None
     range_high: float | None = None
-    midpoint: float | None = None
-    upside: float | None = Field(None, description="Fraction to the midpoint, not a percentage")
+    midpoint: float | None = Field(
+        None, description="The headline estimate: the weight-blended base case"
+    )
+    range_midpoint: float | None = Field(
+        None, description="Centre of the bear-bull range; not the estimate"
+    )
+    upside: float | None = Field(
+        None, description="Fraction to the blended estimate, not a percentage"
+    )
     classification: str
     classification_label: str
     confidence: float | None = None

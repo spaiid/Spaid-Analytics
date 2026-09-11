@@ -38,15 +38,39 @@ EPS = 1e-9
 # Which multiple to use, and how to turn it back into a per-share value.
 # `is_enterprise` says whether the multiple values the whole firm (so net debt
 # must be subtracted to reach equity) or the equity directly.
+# `is_yield` says the number is quoted the other way up -- cash flow over price
+# rather than price over cash flow -- which inverts every operation that scales
+# it. See `_apply_adjustment`.
 MULTIPLE_DRIVERS: dict[str, dict] = {
     "ev_ebit": {"driver": "ebit", "is_enterprise": True, "label": "EV / EBIT"},
     "ev_ebitda": {"driver": "ebitda", "is_enterprise": True, "label": "EV / EBITDA"},
     "ev_revenue": {"driver": "revenue", "is_enterprise": True, "label": "EV / revenue"},
-    "fcf_yield": {"driver": "free_cash_flow", "is_enterprise": False, "label": "Price / free cash flow"},
+    "fcf_yield": {
+        "driver": "free_cash_flow",
+        "is_enterprise": False,
+        "is_yield": True,
+        "label": "Free cash flow yield",
+    },
     "forward_pe": {"driver": "forward_earnings", "is_enterprise": False, "label": "Forward P/E"},
     "trailing_pe": {"driver": "net_income", "is_enterprise": False, "label": "Trailing P/E"},
     "price_to_book": {"driver": "equity", "is_enterprise": False, "label": "Price / book"},
 }
+
+
+def _apply_adjustment(peer_multiple: float, adjustment: float, key: str) -> float:
+    """Scale a peer multiple by the quality adjustment, in the right direction.
+
+    A premium means "this company deserves to be valued more richly than its
+    peers". For a multiple that is *more*, so the multiple rises. For a yield it
+    is *less*: a company the market should pay up for is one it accepts a lower
+    cash-flow yield on. Scaling a yield the same way as a multiple does not just
+    lose the premium, it reverses it -- the resulting value is wrong by a factor
+    of (1 + adjustment) squared, which turned Kraft Heinz's 30% discount into a
+    43% premium and published a $66.48 fair value for a $32.64 company.
+    """
+    if MULTIPLE_DRIVERS[key].get("is_yield"):
+        return peer_multiple / (1.0 + adjustment)
+    return peer_multiple * (1.0 + adjustment)
 
 
 @dataclass(frozen=True)
@@ -84,6 +108,15 @@ class RelativeResult:
     adjustment: float = 0.0
     detail: str = ""
     warnings: list[str] = field(default_factory=list)
+    # The same valuation done at the low and high quantiles of the peer
+    # multiple distribution. The spread between them is what the peer group
+    # actually disagrees by, which is the only honest range available when no
+    # other method ran to disagree with.
+    value_low: float | None = None
+    value_high: float | None = None
+    # Every multiple that contributed, so the blend can be shown rather than
+    # asserted.
+    components: tuple[dict, ...] = ()
 
 
 def _trimmed_median(values: np.ndarray, trim: float) -> float | None:
@@ -126,6 +159,17 @@ def _equity_from_multiple(
     return gross
 
 
+def _describe_multiple(key: str, value: float) -> str:
+    """A peer multiple as a reader would expect to see it.
+
+    `fcf_yield` holds a yield rather than a multiple, so two decimal places of
+    a number near 0.03 renders as "0.0" and looks like missing data.
+    """
+    if key == "fcf_yield":
+        return f"{value:.1%}"
+    return f"{value:.1f}"
+
+
 def comparables_value(
     inputs: RelativeInputs,
     peer_multiples: dict[str, np.ndarray],
@@ -136,15 +180,35 @@ def comparables_value(
     peer_margin: np.ndarray | None = None,
     preferred: tuple[str, ...] | None = None,
 ) -> RelativeResult:
-    """Value the subject at the peer group's multiple.
+    """Value the subject on every peer multiple that works, and blend them.
 
     `peer_multiples` maps a multiple key to the peer group's observed values.
-    The first preferred multiple with enough usable peers and a positive driver
-    for the subject wins.
+
+    Every usable multiple contributes, because choosing one and discarding the
+    rest hides the largest source of uncertainty in a relative valuation: which
+    multiple you picked. This used to take the first preferred multiple with
+    enough peers, which resolved to EV/EBIT for 345 of 366 operating companies
+    and made the preference list a constant. For AMD the five usable multiples
+    ran from $140 to $267 a share, and the one chosen sat near the bottom while
+    the reported uncertainty -- the spread of peers within that single multiple
+    -- described none of it.
+
+    The estimate is the median across multiples, which is robust to one
+    distorted denominator, and the range is the spread of the multiples that
+    survived trimming. Where only one multiple is available the peer
+    distribution's own quantiles supply the range instead, since there is no
+    cross-multiple spread to measure.
     """
     warnings: list[str] = []
     order = preferred or spec.preferred_multiples
 
+    adjustment = 0.0
+    if spec.quality_adjustment:
+        adjustment = _quality_adjustment(
+            inputs, peer_growth, peer_margin, spec.max_adjustment
+        )
+
+    components: list[dict] = []
     for key in order:
         if key not in MULTIPLE_DRIVERS:
             continue
@@ -160,51 +224,123 @@ def comparables_value(
         if peer_multiple is None or peer_multiple <= 0:
             continue
 
-        adjustment = 0.0
-        if spec.quality_adjustment:
-            adjustment = _quality_adjustment(
-                inputs, peer_growth, peer_margin, spec.max_adjustment
-            )
-        adjusted = peer_multiple * (1.0 + adjustment)
-
+        adjusted = _apply_adjustment(peer_multiple, adjustment, key)
         equity = _equity_from_multiple(inputs, adjusted, key)
         if equity is None or inputs.shares <= 0:
             continue
+        per_share = equity / inputs.shares
+        if not math.isfinite(per_share) or per_share <= 0:
+            continue
 
-        detail = (
-            f"{MULTIPLE_DRIVERS[key]['label']} of {peer_multiple:.1f} across "
-            f"{clean.size} peers"
-        )
-        if abs(adjustment) > 0.005:
-            direction = "premium" if adjustment > 0 else "discount"
-            detail += (
-                f", adjusted to {adjusted:.1f} for a {abs(adjustment):.0%} {direction} "
-                "reflecting this company's growth and margins versus the group"
+        # The same arithmetic at the edges of the peer distribution, kept so a
+        # lone surviving multiple can still express an uncertainty.
+        low_q, high_q = spec.spread_quantiles
+        edges: list[float | None] = []
+        for q in (low_q, high_q):
+            edge_multiple = _apply_adjustment(
+                float(np.quantile(clean, q)), adjustment, key
             )
+            edge_equity = (
+                _equity_from_multiple(inputs, edge_multiple, key)
+                if edge_multiple > 0
+                else None
+            )
+            edges.append(edge_equity / inputs.shares if edge_equity is not None else None)
+        # A yield rises as value falls, so the quantiles arrive inverted.
+        peer_low, peer_high = edges
+        if peer_low is not None and peer_high is not None and peer_low > peer_high:
+            peer_low, peer_high = peer_high, peer_low
 
+        components.append(
+            {
+                "multiple": key,
+                "label": MULTIPLE_DRIVERS[key]["label"],
+                "peer_multiple": peer_multiple,
+                "adjusted_multiple": adjusted,
+                "peer_count": int(clean.size),
+                "value_per_share": per_share,
+                "peer_low": peer_low,
+                "peer_high": peer_high,
+            }
+        )
+
+    if not components:
+        warnings.append(
+            "no multiple had both enough comparable peers and a positive figure for this company"
+        )
         return RelativeResult(
-            value_per_share=equity / inputs.shares,
-            multiple_used=key,
-            multiple_label=MULTIPLE_DRIVERS[key]["label"],
-            peer_multiple=peer_multiple,
-            subject_multiple=(subject_multiples or {}).get(key),
-            peer_count=int(clean.size),
-            adjustment=adjustment,
-            detail=detail,
+            value_per_share=None,
+            multiple_used=None,
+            multiple_label=None,
+            peer_multiple=None,
+            subject_multiple=None,
+            detail="comparable-company valuation not available",
             warnings=warnings,
         )
 
-    warnings.append(
-        "no multiple had both enough comparable peers and a positive figure for this company"
-    )
+    # One denominator close to zero -- Gilead's EBITDA net of an impairment was
+    # $0.27bn against a $737 EV multiple -- produces a per-share figure orders
+    # of magnitude from the others. The median already resists it, but the
+    # reported range must not be blown open by it, so it is dropped outright.
+    blended = float(np.median([c["value_per_share"] for c in components]))
+    retained = [
+        c
+        for c in components
+        if blended / spec.max_multiple_ratio <= c["value_per_share"] <= blended * spec.max_multiple_ratio
+    ] or components
+    if len(retained) < len(components):
+        dropped = [c["label"] for c in components if c not in retained]
+        warnings.append(
+            f"{'; '.join(dropped)} implied a value far from every other multiple and was "
+            "excluded, which usually means the figure it divides by is close to zero"
+        )
+    blended = float(np.median([c["value_per_share"] for c in retained]))
+
+    per_share_values = [c["value_per_share"] for c in retained]
+    if len(retained) > 1:
+        value_low, value_high = min(per_share_values), max(per_share_values)
+        detail = (
+            f"median of {len(retained)} peer multiples ("
+            + ", ".join(
+                f"{c['label']} {_describe_multiple(c['multiple'], c['peer_multiple'])} "
+                f"across {c['peer_count']}"
+                for c in retained
+            )
+            + ")"
+        )
+    else:
+        lone = retained[0]
+        value_low, value_high = lone["peer_low"], lone["peer_high"]
+        detail = (
+            f"{lone['label']} of {_describe_multiple(lone['multiple'], lone['peer_multiple'])} "
+            f"across {lone['peer_count']} peers"
+        )
+
+    if abs(adjustment) > 0.005:
+        direction = "premium" if adjustment > 0 else "discount"
+        detail += (
+            f", each adjusted by a {abs(adjustment):.0%} {direction} "
+            "reflecting this company's growth and margins versus the group"
+        )
+
+    # The multiple whose own answer is closest to the blend, so that every
+    # consumer expecting a single representative multiple still gets an honest
+    # one rather than a label invented for the blend.
+    representative = min(retained, key=lambda c: abs(c["value_per_share"] - blended))
+
     return RelativeResult(
-        value_per_share=None,
-        multiple_used=None,
-        multiple_label=None,
-        peer_multiple=None,
-        subject_multiple=None,
-        detail="comparable-company valuation not available",
+        value_per_share=blended,
+        multiple_used=representative["multiple"],
+        multiple_label=representative["label"],
+        peer_multiple=representative["peer_multiple"],
+        subject_multiple=(subject_multiples or {}).get(representative["multiple"]),
+        peer_count=representative["peer_count"],
+        adjustment=adjustment,
+        detail=detail,
         warnings=warnings,
+        value_low=value_low,
+        value_high=value_high,
+        components=tuple(retained),
     )
 
 
@@ -322,7 +458,8 @@ def historical_value(
             observations=int(clean.size),
             regime_change=regime_change,
             detail=(
-                f"its own median {MULTIPLE_DRIVERS[key]['label']} of {typical:.1f} over "
+                f"its own median {MULTIPLE_DRIVERS[key]['label']} of "
+                f"{_describe_multiple(key, typical)} over "
                 f"the past {spec.lookback_years} years"
             ),
             warnings=warnings,

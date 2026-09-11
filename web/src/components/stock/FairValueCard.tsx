@@ -209,14 +209,14 @@ export function FairValueCard({ ticker, fairValue }: FairValueCardProps) {
     `Overall range ${fairValue.range_low === null ? DASH : currency(fairValue.range_low)} to ${
       fairValue.range_high === null ? DASH : currency(fairValue.range_high)
     },`,
-    `midpoint ${fairValue.midpoint === null ? DASH : currency(fairValue.midpoint)}.`,
+    `fair value ${fairValue.midpoint === null ? DASH : currency(fairValue.midpoint)}.`,
     `The traded price is ${currency(fairValue.price)}.`,
   ].join(' ');
 
   return (
     <Card
       title="Fair value"
-      subtitle="A range, not a number. The midpoint is secondary to the width of the range and to the confidence beside it."
+      subtitle="A range, not a number. The estimate is the blend of the methods that ran; the width of the range and the confidence beside it matter more."
     >
       <RangeBar
         ariaLabel={rangeLabel}
@@ -232,18 +232,18 @@ export function FairValueCard({ ticker, fairValue }: FairValueCardProps) {
 
       <div className="sd-fv-facts">
         <StatTile
-          label="Upside to midpoint"
-          hint="The distance from today's price to the midpoint of the range. The range matters more than this single number."
+          label="Upside to fair value"
+          hint="The distance from today's price to the weighted blend of the methods that ran. Not the centre of the range, which sits higher because value compounds. The range matters more than this single number."
           value={
             <ValueOrMissing
               value={fairValue.upside}
               format={(value) => signedPct(value, 1)}
-              label="Upside to midpoint"
+              label="Upside to fair value"
               status="missing"
-              detail="No midpoint was produced, so there is no distance to report."
+              detail="No fair value was produced, so there is no distance to report."
             />
           }
-          sub={`Midpoint ${fairValue.midpoint === null ? DASH : currency(fairValue.midpoint)} · price ${currency(
+          sub={`Fair value ${fairValue.midpoint === null ? DASH : currency(fairValue.midpoint)} · price ${currency(
             fairValue.price,
           )}`}
         />
@@ -270,7 +270,11 @@ export function FairValueCard({ ticker, fairValue }: FairValueCardProps) {
           sub={fairValue.confidence_label ?? 'No confidence label'}
           footer={
             fairValue.method_dispersion === null ? (
-              'Method dispersion not reported'
+              used.length === 1 ? (
+                'Only one method ran, so nothing cross-checks it'
+              ) : (
+                'Method dispersion not reported'
+              )
             ) : (
               <>Method dispersion {pct(fairValue.method_dispersion, 0)} — how far the methods disagree</>
             )

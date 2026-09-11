@@ -129,7 +129,7 @@ class TestValueCompany:
         assert r.bear <= r.base <= r.bull
         assert r.range_low == r.bear
         assert r.range_high == r.bull
-        assert r.midpoint == pytest.approx((r.bear + r.bull) / 2)
+        assert r.midpoint == pytest.approx(r.base)
 
     def test_runs_all_three_methods_for_an_operating_company(self):
         r = value_company(operating(), SPEC)
@@ -315,9 +315,24 @@ class TestRangeIntegrity:
         r = value_company(operating(), SPEC)
         assert r.range_high / max(r.range_low, 1e-9) < 10.0
 
-    def test_midpoint_is_the_centre_of_the_range(self):
+    def test_the_headline_is_the_weighted_blend_not_the_centre_of_the_range(self):
+        """The reported estimate must be the one the methods actually produced.
+
+        Value compounds, so the bull case sits further above the base than the
+        bear case sits below it. The arithmetic centre of that range is
+        therefore biased upward -- it exceeded the blend for 402 of 495 S&P
+        companies by a mean of 10.3%, flipping 42 upside signs. The centre is
+        still reported, as `range_midpoint`, but nothing is decided on it.
+        """
         r = value_company(operating(), SPEC)
-        assert r.midpoint == pytest.approx((r.range_low + r.range_high) / 2)
+        assert r.midpoint == pytest.approx(r.base)
+        assert r.range_midpoint == pytest.approx((r.range_low + r.range_high) / 2)
+
+    def test_the_range_centre_is_recorded_but_is_not_the_estimate(self):
+        r = value_company(operating(), SPEC)
+        assert r.range_midpoint is not None
+        # An asymmetric range is the normal case, so the two genuinely differ.
+        assert r.range_midpoint != pytest.approx(r.midpoint)
 
 
 class TestRangeWidthConfidence:
@@ -391,3 +406,94 @@ class TestRangeSpansMethods:
             [s["value_per_share"] for s in r.scenarios] or [0.0]
         )
         assert r.range_high <= max(max(used), scenario_high) * 1.001
+
+
+class TestLoneMethodHonesty:
+    """A single method must not dress its own uncertainty up as a measurement.
+
+    AMD showed a bear of $127.87, a base of $159.83 and a bull of $191.80
+    against a price of $503.60. The three numbers were one number: the
+    comparables value, multiplied by 0.8 and 1.2. The dispersion beside them
+    read 0%, which is what three methods in perfect agreement would also read.
+    """
+
+    @staticmethod
+    def _comparables_only(**kw) -> CompanyValuationInputs:
+        """Peers and a price, but nothing for the other methods to work with."""
+        rng = np.random.default_rng(11)
+        base = dict(
+            revenue=None,
+            operating_margin=None,
+            own_multiple_history={},
+            peer_multiples={"ev_ebit": rng.normal(40.0, 8.0, 20)},
+            peer_growth=rng.normal(0.10, 0.03, 20),
+            peer_margin=rng.normal(0.18, 0.04, 20),
+        )
+        base.update(kw)
+        return operating(**base)
+
+    def test_one_method_reports_unknown_disagreement_not_zero(self):
+        r = value_company(self._comparables_only(), SPEC)
+        used = [m for m in r.methods if m.used]
+        assert len(used) == 1
+        assert r.method_dispersion is None
+
+    def test_the_range_comes_from_the_peer_spread_not_a_fixed_band(self):
+        r = value_company(self._comparables_only(), SPEC)
+        assert r.base is not None
+        # A 20% band would put the bounds at exactly 0.8 and 1.2 of the base.
+        assert r.range_low / r.base != pytest.approx(0.80, abs=1e-6)
+        assert r.range_high / r.base != pytest.approx(1.20, abs=1e-6)
+        assert r.range_low < r.base < r.range_high
+
+    def test_a_wider_peer_group_produces_a_wider_range(self):
+        """The range has to respond to the evidence it claims to summarise."""
+        rng = np.random.default_rng(3)
+        tight = value_company(
+            self._comparables_only(
+                peer_multiples={"ev_ebit": rng.normal(40.0, 1.0, 20)}
+            ),
+            SPEC,
+        )
+        loose = value_company(
+            self._comparables_only(
+                peer_multiples={"ev_ebit": rng.normal(40.0, 15.0, 20)}
+            ),
+            SPEC,
+        )
+        tight_width = (tight.range_high - tight.range_low) / tight.midpoint
+        loose_width = (loose.range_high - loose.range_low) / loose.midpoint
+        assert loose_width > tight_width
+
+    def test_an_asserted_band_says_that_it_is_asserted(self):
+        """Where nothing can measure the spread, the caveat must admit it."""
+        r = value_company(
+            self._comparables_only(peer_multiples={"fcf_yield": np.full(20, 0.05)}),
+            SPEC,
+        )
+        # Identical peers leave nothing to measure, so the band is asserted.
+        assert r.range_low == pytest.approx(r.base * 0.65)
+        assert r.range_high == pytest.approx(r.base * 1.35)
+        assert any("generic band" in c for c in r.caveats)
+
+
+class TestDcfWithdrawal:
+    def test_a_dcf_contradicting_reported_cash_flow_is_withdrawn_with_a_reason(self):
+        """The reason must name the assumption, not just call the answer odd."""
+        r = value_company(
+            operating(
+                price=503.60,
+                revenue=41_305_000_000.0,
+                operating_margin=0.157,
+                free_cash_flow=8_403_000_000.0,
+                revenue_growth=0.395,
+                forward_eps_growth=1.06,
+                sales_to_capital=0.72,
+                beta=1.85,
+            ),
+            SPEC,
+        )
+        dcf = next(m for m in r.methods if m.method == "dcf")
+        assert not dcf.used
+        assert dcf.reason is not None
+        assert "free cash flow the company actually reported" in dcf.reason

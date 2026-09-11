@@ -174,7 +174,25 @@ INCOME: tuple[ConceptSpec, ...] = (
             "DepreciationAndAmortization",  # 226/500
             "Depreciation",  # 354/500
         ),
-        description="Taken from the cash-flow statement; the EBITDA add-back.",
+        description=(
+            "Taken from the cash-flow statement; the EBITDA add-back. The first three tags "
+            "include amortisation of intangibles; the last does not, and 76 filers report "
+            "only that one. For them this concept is depreciation alone and has to be "
+            "completed with `amortization_intangibles` -- see `depreciation_only`."
+        ),
+    ),
+    ConceptSpec(
+        "depreciation_only", "Depreciation excluding amortisation",
+        PeriodType.DURATION, Unit.USD,
+        ("Depreciation",),  # 354/500
+        absent_means_zero=False,
+        description=(
+            "The narrow tag on its own, so the metric layer can tell whether "
+            "`depreciation_amortization` fell through to it. Where the two are equal, "
+            "amortisation is missing rather than zero: AMD reported $521m against $2.3bn of "
+            "intangible amortisation, and Broadcom $574m against $8.1bn, which understated "
+            "their EBITDA by 4.4x and 14x respectively."
+        ),
     ),
     ConceptSpec(
         "amortization_intangibles", "Amortisation of intangibles",

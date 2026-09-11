@@ -35,11 +35,18 @@ log = logging.getLogger(__name__)
 
 EPS = 1e-9
 
+# How far one concept's as-of date may trail another's before combining the two
+# stops describing a single period. A little over one quarter, so a filer that
+# tags a line one reporting cycle late is tolerated and one that stopped tagging
+# it altogether is not.
+_MAX_CONCEPT_LAG_DAYS = 120
+
 # Concepts the metric layer needs from the point-in-time fundamentals table.
 NEEDED_CONCEPTS: tuple[str, ...] = (
     "revenue", "cost_of_revenue", "gross_profit", "operating_income",
     "pretax_income", "tax_expense", "net_income", "net_income_to_common",
-    "interest_expense", "depreciation_amortization", "share_based_comp",
+    "interest_expense", "depreciation_amortization", "depreciation_only",
+    "amortization_intangibles", "share_based_comp",
     "eps_diluted", "eps_basic", "shares_diluted", "shares_basic",
     "rnd", "sga", "operating_expenses",
     "operating_cash_flow", "capex", "acquisitions", "buyback", "dividends_paid",
@@ -57,16 +64,47 @@ NEEDED_CONCEPTS: tuple[str, ...] = (
 )
 
 
-def safe_div(num: pl.Expr, den: pl.Expr, *, positive_only: bool = False) -> pl.Expr:
+def safe_div(
+    num: pl.Expr,
+    den: pl.Expr,
+    *,
+    positive_only: bool = False,
+    numerator_positive: bool = False,
+) -> pl.Expr:
     """Divide, returning null rather than infinity when the denominator fails.
 
     `positive_only` additionally rejects negative denominators, which is what
     makes a ratio like return on equity silently skip companies with negative
     book value instead of reporting a positive return for a loss-making,
     balance-sheet-insolvent business.
+
+    `numerator_positive` rejects a negative *numerator*, for the ratios where a
+    negative one is not a low number but a meaningless one. A company whose
+    enterprise value is below zero has no EV/EBIT -- but the arithmetic returns
+    a negative, which then ranks as the cheapest stock in the index. Moderna
+    scored 93.75 on forward P/E for having negative forward earnings.
     """
     guard = (den > EPS) if positive_only else (den.abs() > EPS)
+    if numerator_positive:
+        guard = guard & (num > EPS)
     return pl.when(guard).then(num / den).otherwise(None)
+
+
+def bounded(expr: pl.Expr, low: float, high: float) -> pl.Expr:
+    """Null out a ratio that has left the range its definition allows.
+
+    Not a clip: a gross margin of 295% is not a 100% margin, it is evidence that
+    revenue or cost of revenue is wrong, and the honest answer is that the
+    metric is unavailable. Clipping would rank the company at the top of the
+    index on a number nobody measured.
+
+    Financial-sector filers are the common case. `Revenues` for a bank or a
+    tower REIT is often a fragment of the real top line, so operating income
+    over it exceeds one: Extra Space Storage printed 1043%, and eleven names
+    took top-decile quality scores on an arithmetically impossible figure while
+    also setting the peer median every other bank was ranked against.
+    """
+    return pl.when(expr.is_between(low, high)).then(expr).otherwise(None)
 
 
 def build_grid(
@@ -213,11 +251,33 @@ def add_building_blocks(panel: pl.DataFrame, *, dcf: DcfSpec | None = None) -> p
         # Gross profit, derived where the filer does not tag it directly. Half
         # the index does not report `GrossProfit`, and half a quality category
         # is too much to lose to a tagging convention.
+        # The reported tag leads only while it is as current as the derivation.
+        #
+        # Each concept is as-of joined independently, so a filer that stopped
+        # tagging `GrossProfit` keeps serving its last one indefinitely against
+        # a revenue line that moved on. Sixty-two companies were carrying a
+        # gross profit staler than their revenue by a year or more, which is how
+        # DuPont came to report a 295% gross margin and score 98.6 on it, and
+        # Valero a negative one. Where the reported figure has fallen behind,
+        # `revenue - cost_of_revenue` is both fresher and internally consistent.
         pl.coalesce(
-            c("gross_profit"),
+            pl.when(
+                c("gross_profit").is_not_null()
+                & (
+                    c("gross_profit__asof").is_null()
+                    | c("revenue__asof").is_null()
+                    | (
+                        (c("revenue__asof") - c("gross_profit__asof")).dt.total_days()
+                        <= _MAX_CONCEPT_LAG_DAYS
+                    )
+                )
+            )
+            .then(c("gross_profit"))
+            .otherwise(None),
             pl.when(c("revenue").is_not_null() & c("cost_of_revenue").is_not_null())
             .then(c("revenue") - c("cost_of_revenue"))
             .otherwise(None),
+            c("gross_profit"),
         ).alias("gross_profit"),
         (c("debt_long").fill_null(0.0) + c("debt_current").fill_null(0.0)).alias("total_debt"),
         (c("cash").fill_null(0.0) + c("short_term_investments").fill_null(0.0)).alias(
@@ -234,9 +294,60 @@ def add_building_blocks(panel: pl.DataFrame, *, dcf: DcfSpec | None = None) -> p
     # 10-for-1 split produced a trailing figure of -$9.24 for a company earning
     # $13.6bn. Dividing trailing net income by the current diluted share count
     # is always internally consistent, and is what a valuation needs anyway.
+    # Depreciation and amortisation, completed where the filer reported only the
+    # narrow tag.
+    #
+    # `DepreciationDepletionAndAmortization` and its siblings include amortising
+    # intangibles; the plain `Depreciation` tag does not, and 76 filers report
+    # only that one. Where the resolved figure equals the depreciation-only tag,
+    # the amortisation is missing rather than zero, and must be added back --
+    # AMD reported $521m against $2.3bn of intangible amortisation, and Broadcom
+    # $574m against $8.1bn. Left uncorrected it understated their EBITDA by 4.4x
+    # and 14x, which then set the peer median every EBITDA multiple is measured
+    # against.
+    #
+    # Equality is the test rather than the tag itself, because it is exact: the
+    # two concepts can only agree when the broad chain fell through to the narrow
+    # tag. A filer whose broad tag genuinely carries no amortisation is
+    # unaffected, because there is nothing to add.
+    da_reported = c("depreciation_amortization")
+    da = pl.when(
+        da_reported.is_not_null()
+        & c("depreciation_only").is_not_null()
+        & ((da_reported - c("depreciation_only")).abs() < 1.0)
+    ).then(
+        da_reported + c("amortization_intangibles").fill_null(0.0)
+    ).otherwise(da_reported)
+
+    # Cash the shareholders could actually receive.
+    #
+    # `cash_and_equivalents` is whatever sits in the cash line, and for anyone
+    # who holds money on behalf of customers that is not the same thing. CME
+    # reports $160.3bn against $158.7bn of current liabilities -- clearing-member
+    # performance bonds held in trust, matched almost exactly by the obligation
+    # to return them. Netting the whole balance drove CME and ICE to a negative
+    # enterprise value and published them as the two most undervalued names in
+    # the index at maximum confidence. Brokers (IBKR), travel marketplaces
+    # holding traveller deposits (BKNG, ABNB, EXPE) and asset managers holding
+    # client funds (AMP) all carry the same shape.
+    #
+    # The bound is what the company's own capital could have bought: cash beyond
+    # equity plus borrowings was funded by someone else and is owed back. It is
+    # deliberately a blunt cap rather than a sector rule -- it needs no list of
+    # which filers are clearing houses, and it binds for 14 companies while
+    # leaving every ordinary cash-rich balance sheet untouched.
+    usable_cash = pl.min_horizontal(
+        c("cash_and_equivalents"),
+        pl.max_horizontal(
+            c("equity").fill_null(0.0) + c("total_debt").fill_null(0.0), pl.lit(0.0)
+        ),
+    )
+
     out = out.with_columns(
-        (c("total_debt") - c("cash_and_equivalents")).alias("net_debt"),
-        (c("operating_income") + c("depreciation_amortization").fill_null(0.0)).alias("ebitda"),
+        usable_cash.alias("cash_usable"),
+        (c("total_debt") - usable_cash).alias("net_debt"),
+        da.alias("depreciation_amortization"),
+        (c("operating_income") + da.fill_null(0.0)).alias("ebitda"),
         c("operating_income").alias("ebit"),
         # Owner free cash flow charges share-based compensation, which the cash
         # statement adds back. It is not a cost to the company's bank account
@@ -350,11 +461,18 @@ def add_quality(panel: pl.DataFrame) -> pl.DataFrame:
     out = panel.with_columns(
         safe_div(c("nopat"), c("invested_capital"), positive_only=True).alias("roic"),
         safe_div(c("net_income"), c("equity"), positive_only=True).alias("roe"),
-        safe_div(c("gross_profit"), c("revenue"), positive_only=True).alias("gross_margin"),
-        safe_div(c("operating_income"), c("revenue"), positive_only=True).alias(
-            "operating_margin"
-        ),
-        safe_div(c("free_cash_flow"), c("revenue"), positive_only=True).alias("fcf_margin"),
+        # Margins are bounded by their own definition. A gross margin above one
+        # or below minus one, or an operating margin of 1043%, means the revenue
+        # denominator is undertagged rather than the business being remarkable.
+        bounded(
+            safe_div(c("gross_profit"), c("revenue"), positive_only=True), -1.0, 1.0
+        ).alias("gross_margin"),
+        bounded(
+            safe_div(c("operating_income"), c("revenue"), positive_only=True), -1.0, 1.0
+        ).alias("operating_margin"),
+        bounded(
+            safe_div(c("free_cash_flow"), c("revenue"), positive_only=True), -1.0, 1.0
+        ).alias("fcf_margin"),
         safe_div(c("free_cash_flow"), c("net_income"), positive_only=True).alias(
             "fcf_conversion"
         ),
@@ -425,10 +543,17 @@ def add_growth(panel: pl.DataFrame) -> pl.DataFrame:
         _cagr(c("eps_diluted"), c("eps_diluted__lag3y"), 3).alias("eps_growth_3y"),
         _cagr(c("free_cash_flow"), c("free_cash_flow__lag3y"), 3).alias("fcf_growth_3y"),
         _cagr(c("gross_profit"), c("gross_profit__lag3y"), 3).alias("gross_profit_growth_3y"),
-        # Negative means dilution, positive means the count shrank: buybacks
-        # score well, serial issuance scores badly.
+        # Year-over-year *change* in the share count, as the name and the metric
+        # spec both say: positive is dilution, negative is a buyback, and the
+        # spec scores it with direction -1 so that less is better.
+        #
+        # This was subtracted the other way round -- current from lagged, giving
+        # a *reduction* -- while the spec kept scoring it as a change. The two
+        # cancelled into a straight inversion: Omnicom issued 53% more shares to
+        # buy Interpublic and scored 98.9 out of 100 on it, while DaVita retired
+        # 15% of its own and scored 1.1.
         safe_div(
-            c("shares_current_basis__lag1y") - c("shares_current_basis"),
+            c("shares_current_basis") - c("shares_current_basis__lag1y"),
             c("shares_current_basis__lag1y").abs(),
         ).alias("share_count_change"),
         (c("operating_margin") - c("operating_margin__lag1y")).alias("margin_trend"),
@@ -448,9 +573,9 @@ def add_growth(panel: pl.DataFrame) -> pl.DataFrame:
 def add_valuation(panel: pl.DataFrame) -> pl.DataFrame:
     c = pl.col
     out = panel.with_columns(
-        safe_div(c("enterprise_value"), c("ebit"), positive_only=True).alias("ev_ebit"),
-        safe_div(c("enterprise_value"), c("ebitda"), positive_only=True).alias("ev_ebitda"),
-        safe_div(c("enterprise_value"), c("revenue"), positive_only=True).alias("ev_revenue"),
+        safe_div(c("enterprise_value"), c("ebit"), positive_only=True, numerator_positive=True).alias("ev_ebit"),
+        safe_div(c("enterprise_value"), c("ebitda"), positive_only=True, numerator_positive=True).alias("ev_ebitda"),
+        safe_div(c("enterprise_value"), c("revenue"), positive_only=True, numerator_positive=True).alias("ev_revenue"),
         safe_div(c("free_cash_flow"), c("market_cap"), positive_only=True).alias("fcf_yield"),
         safe_div(c("net_income"), c("market_cap"), positive_only=True).alias("earnings_yield"),
         safe_div(c("market_cap"), pl.coalesce(c("equity_incl_nci"), c("equity")), positive_only=True)

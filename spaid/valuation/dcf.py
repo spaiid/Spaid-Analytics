@@ -11,10 +11,15 @@ terms:
 
 Choices worth stating because they move the answer:
 
-* **Share-based compensation is a cost.** The cash-flow statement adds it back
-  because no cash left the building, but something of value did leave the
-  existing owners. Treating it as free systematically overvalues exactly the
-  companies that use it most.
+* **Share-based compensation is a cost, and is already charged.** The cash-flow
+  statement adds it back because no cash left the building, but something of
+  value did leave the existing owners, so it should not be added back here.
+  Note *already*: the projection starts from GAAP operating income
+  (`OperatingIncomeLoss`), which under ASC 718 has expensed stock compensation
+  before the model sees it. Subtracting it a second time -- which this model did
+  until it was caught by comparing its first projected year against reported
+  cash flow -- charges the companies that use it most for it twice, and turned
+  CrowdStrike's 20.6% pre-compensation margin into an effective -25.0%.
 * **Growth must be paid for.** Reinvestment is tied to revenue growth through a
   sales-to-capital ratio, so a model cannot assume a company grows at 15% a year
   while returning all its cash. That assumption is the most common way a
@@ -65,6 +70,25 @@ class DcfInputs:
     beta: float = 1.0
     market_cap: float | None = None
     risk_free_rate: float | None = None
+    # What the company actually reported as free cash flow over the trailing
+    # year. Not used to value anything -- used to check that the projection's
+    # first year resembles the company it claims to be projecting.
+    reported_free_cash_flow: float | None = None
+    # Consensus revenue *levels* for the next years, nearest first, and the
+    # ratio of the analyst low and high to the consensus at the far end of that
+    # path. Levels rather than growth rates because the trailing twelve months
+    # already overlaps the current fiscal year, so a growth rate computed
+    # against it is not the growth rate anyone is forecasting.
+    consensus_revenue: tuple[float, ...] = ()
+    consensus_low_ratio: float = 1.0
+    consensus_high_ratio: float = 1.0
+    # The operating margin implied by consensus earnings in each of those
+    # years, aligned with `consensus_revenue`. Consensus earnings cannot anchor
+    # the model directly -- they are a margin assumption and a revenue
+    # assumption bundled together -- but once revenue is known the margin falls
+    # out of them, year by year.
+    consensus_margins: tuple[float | None, ...] = ()
+    n_revenue_analysts: int | None = None
 
     def validate(self) -> list[str]:
         """Reasons this company cannot be valued this way, for the caller to act on."""
@@ -106,6 +130,13 @@ class DcfResult:
     years: list[YearProjection] = field(default_factory=list)
     assumptions: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    # The projection's first year disagrees in sign, and materially in size,
+    # with the cash flow the company actually reported. Set when the
+    # reinvestment assumption -- not the business -- is driving the result.
+    contradicts_reported_fcf: bool = False
+    # The operating business values at or below zero, so whatever equity value
+    # survives is the balance sheet rather than the company.
+    enterprise_value_negative: bool = False
 
 
 def cost_of_equity(
@@ -198,7 +229,65 @@ def project(
         start_growth = 0.40
     start_growth = max(start_growth, -0.25)
 
+    # --- consensus anchoring ------------------------------------------------
+    # Where enough analysts cover the company, the first years of the
+    # projection are theirs rather than the model's. Fading a trailing growth
+    # rate from a trailing margin cannot produce a company whose earnings are
+    # about to triple, and for AMD it projected $6.04 of earnings per share
+    # against a consensus of $15.61 -- a projection of a different company,
+    # which then set the fair value.
+    consensus_path: list[float] = []
+    use_consensus = (
+        bool(inputs.consensus_revenue)
+        and inputs.revenue > 0
+        and (inputs.n_revenue_analysts or 0) >= spec.consensus_min_analysts
+        and all(v and v > 0 for v in inputs.consensus_revenue)
+    )
+    if use_consensus:
+        side = getattr(scenario, "consensus_side", "mid")
+        far_ratio = (
+            inputs.consensus_low_ratio
+            if side == "low"
+            else inputs.consensus_high_ratio
+            if side == "high"
+            else 1.0
+        )
+        # The analyst spread widens with distance, so the near year is barely
+        # scaled and the far year takes the full low or high.
+        horizon = len(inputs.consensus_revenue)
+        for i, level in enumerate(inputs.consensus_revenue, start=1):
+            ratio = 1.0 + (far_ratio - 1.0) * (i / horizon)
+            consensus_path.append(level * ratio)
+        # A path that implies the company shrinks below where it already is has
+        # nothing to contribute over the model's own fade.
+        if consensus_path[-1] <= inputs.revenue:
+            consensus_path = []
+
+    # Consensus margins, capped: a margin far above today's is an expectation
+    # worth taking seriously, but one implied by a broken earnings estimate is
+    # not, and from a single number the two look alike.
+    margin_path: list[float] = []
+    if consensus_path:
+        ceiling = inputs.operating_margin + spec.consensus_margin_cap_pp
+        for value in inputs.consensus_margins[: len(consensus_path)]:
+            if value is None or not math.isfinite(value):
+                margin_path = []
+                break
+            capped = min(value, ceiling)
+            if capped < value:
+                warnings.append(
+                    f"consensus earnings imply a {value:.0%} operating margin against "
+                    f"{inputs.operating_margin:.0%} today, which is too far to take at face "
+                    f"value; capped at {capped:.0%}"
+                )
+            margin_path.append(capped)
+
     target_margin = inputs.operating_margin + scenario.margin_adjustment
+    if margin_path:
+        # Beyond the consensus years the margin holds where consensus left it,
+        # nudged by the scenario. Reverting to the trailing margin instead would
+        # undo in year three what years one and two were anchored to.
+        target_margin = margin_path[-1] + scenario.margin_adjustment
     sales_to_capital = min(
         max(inputs.sales_to_capital or spec.sales_to_capital_default, spec.sales_to_capital_floor),
         spec.sales_to_capital_cap,
@@ -208,18 +297,49 @@ def project(
     years: list[YearProjection] = []
     revenue = inputs.revenue
     pv_explicit = 0.0
-    # Share-based compensation is charged as a share of revenue so it scales
-    # with the business rather than staying frozen at today's dollar amount.
+    # Share-based compensation is scaled as a share of revenue so it tracks the
+    # business rather than staying frozen at today's dollar amount. It is only
+    # ever *added back*: the starting margin is GAAP, so the cost is already in
+    # the projection, and treating it as an expense means leaving it alone.
     sbc_ratio = (
         (inputs.share_based_comp / inputs.revenue)
-        if spec.treat_sbc_as_expense and inputs.revenue > 0
+        if not spec.treat_sbc_as_expense and inputs.revenue > 0
         else 0.0
     )
 
     n = spec.forecast_years
+    horizon = len(consensus_path)
+    # After the consensus runs out, growth fades from where consensus left it
+    # rather than from the trailing rate, so the two halves of the projection
+    # join up. The cap still applies: a consensus year-on-year rate above it is
+    # a forecast, not a decade-long trend.
+    post_growth = start_growth
+    if horizon:
+        previous = consensus_path[-2] if horizon > 1 else inputs.revenue
+        if previous > 0:
+            post_growth = min(consensus_path[-1] / previous - 1.0, 0.40)
+
     for t in range(1, n + 1):
-        growth = _fade(start_growth, terminal_growth, t, n, scenario.fade_strength)
-        margin = _fade(inputs.operating_margin, target_margin, t, min(5, n), 1.0)
+        if t <= horizon:
+            growth = consensus_path[t - 1] / revenue - 1.0
+        else:
+            growth = _fade(
+                post_growth, terminal_growth, t - horizon, n - horizon, scenario.fade_strength
+            )
+
+        if margin_path and t <= len(margin_path):
+            margin = margin_path[t - 1]
+        elif margin_path:
+            # Already at the consensus margin; only the scenario nudge remains.
+            margin = _fade(
+                margin_path[-1],
+                target_margin,
+                t - len(margin_path),
+                min(5, n - len(margin_path)),
+                1.0,
+            )
+        else:
+            margin = _fade(inputs.operating_margin, target_margin, t, min(5, n), 1.0)
 
         previous_revenue = revenue
         revenue = revenue * (1.0 + growth)
@@ -228,8 +348,9 @@ def project(
         # Growth has to be funded. A company adding revenue needs working
         # capital and capacity to support it.
         reinvestment = max(revenue - previous_revenue, 0.0) / sales_to_capital
-        sbc = revenue * sbc_ratio
-        fcf = nopat - reinvestment - sbc
+        # Added back net of tax, because the expense was deductible.
+        sbc_addback = revenue * sbc_ratio * (1.0 - tax)
+        fcf = nopat + sbc_addback - reinvestment
 
         discount_factor = 1.0 / ((1.0 + rate) ** t)
         pv = fcf * discount_factor
@@ -280,15 +401,61 @@ def project(
     )
     value_per_share = equity_value / inputs.shares
 
+    # The terminal value's share of the total is only a share when the total is
+    # a positive number. Against a negative total the ratio stops describing
+    # anything -- it printed 434%, -9753% and 322% across the three scenarios of
+    # a company whose enterprise value was near zero -- and every downstream
+    # threshold test on it silently passes. Undefined is the honest answer
+    # there, and the caller is told why separately.
+    #
+    # A share above one is a different case and is left alone: a company that
+    # consumes cash for a few years and earns it back later genuinely has more
+    # than all of its value beyond the forecast, and saying so is useful.
     total = pv_explicit + terminal_pv
-    terminal_share = terminal_pv / total if abs(total) > EPS else float("nan")
+    terminal_share = terminal_pv / total if total > EPS else float("nan")
     if math.isfinite(terminal_share) and terminal_share > spec.terminal_share_warning:
         warnings.append(
             f"{terminal_share:.0%} of the value sits in the terminal period, so the estimate "
             "rests mostly on assumptions about the distant future"
         )
+
+    enterprise_value_negative = enterprise_value <= 0
+    if enterprise_value_negative:
+        warnings.append(
+            "the operating business discounts to zero or less, so the whole estimate is the "
+            "balance sheet rather than the company"
+        )
+    elif pv_explicit < 0:
+        warnings.append(
+            "every year of the forecast consumes cash, so the entire value rests on the "
+            "terminal period"
+        )
     if equity_value < 0:
         warnings.append("debt exceeds the computed enterprise value, so equity values below zero")
+
+    # A projection whose first year contradicts the cash flow the company just
+    # reported is describing an investment cycle that is not happening. This is
+    # the cheapest available check that the reinvestment assumption is sane,
+    # and it is the one that catches an acquisition-inflated capital base being
+    # used as the marginal cost of growth.
+    contradicts = False
+    reported = inputs.reported_free_cash_flow
+    first_year_fcf = years[0].free_cash_flow
+    if (
+        reported is not None
+        and math.isfinite(reported)
+        and reported > 0
+        and first_year_fcf < 0
+        and inputs.revenue > 0
+        and (reported - first_year_fcf) / inputs.revenue > spec.fcf_contradiction_threshold
+    ):
+        contradicts = True
+        warnings.append(
+            f"the projection turns a reported {reported / 1e9:,.1f}bn of free cash flow into "
+            f"{first_year_fcf / 1e9:,.1f}bn in its first year, a swing of "
+            f"{(reported - first_year_fcf) / inputs.revenue:.0%} of revenue, so the "
+            "reinvestment assumption rather than the business is driving the result"
+        )
 
     return DcfResult(
         value_per_share=value_per_share,
@@ -300,9 +467,14 @@ def project(
         terminal_value_pv=terminal_pv,
         terminal_share=terminal_share,
         pv_explicit=pv_explicit,
+        contradicts_reported_fcf=contradicts,
+        enterprise_value_negative=enterprise_value_negative,
         years=years,
         assumptions={
             "scenario": scenario.label,
+            "anchored_to_consensus": bool(consensus_path),
+            "consensus_years": len(consensus_path),
+            "consensus_margins": margin_path or None,
             "starting_revenue": inputs.revenue,
             "starting_growth": start_growth,
             "starting_margin": inputs.operating_margin,
@@ -385,18 +557,61 @@ def sensitivity(
 
     from dataclasses import replace
 
-    record(
-        "Revenue growth",
-        "Starting growth rate 3 percentage points either side",
-        replace(inputs, growth_rate=(inputs.growth_rate or 0) - 0.03),
-        replace(inputs, growth_rate=(inputs.growth_rate or 0) + 0.03),
+    # Perturb what the projection actually reads.
+    #
+    # Under consensus anchoring `growth_rate` and `operating_margin` are both
+    # overridden -- revenue comes from the analyst path and the margin from what
+    # consensus earnings imply on it -- so nudging them moved nothing and the
+    # table reported a 0.0% swing on the two assumptions that drive the model.
+    # That is not "insensitive", it is "not measured", and it silently inflated
+    # confidence because the worst observed swing was understated.
+    anchored = bool(
+        inputs.consensus_revenue
+        and (inputs.n_revenue_analysts or 0) >= spec.consensus_min_analysts
     )
-    record(
-        "Operating margin",
-        "Operating margin 2 percentage points either side",
-        replace(inputs, operating_margin=inputs.operating_margin - 0.02),
-        replace(inputs, operating_margin=inputs.operating_margin + 0.02),
-    )
+
+    def _scaled_revenue(factor: float) -> DcfInputs:
+        return replace(
+            inputs,
+            consensus_revenue=tuple(v * factor for v in inputs.consensus_revenue),
+            growth_rate=(inputs.growth_rate or 0) + (factor - 1.0),
+        )
+
+    def _shifted_margin(delta: float) -> DcfInputs:
+        return replace(
+            inputs,
+            consensus_margins=tuple(
+                None if m is None else m + delta for m in inputs.consensus_margins
+            ),
+            operating_margin=inputs.operating_margin + delta,
+        )
+
+    if anchored:
+        record(
+            "Revenue growth",
+            "Consensus revenue path 3% either side",
+            _scaled_revenue(0.97),
+            _scaled_revenue(1.03),
+        )
+        record(
+            "Operating margin",
+            "Operating margin 2 percentage points either side",
+            _shifted_margin(-0.02),
+            _shifted_margin(+0.02),
+        )
+    else:
+        record(
+            "Revenue growth",
+            "Starting growth rate 3 percentage points either side",
+            replace(inputs, growth_rate=(inputs.growth_rate or 0) - 0.03),
+            replace(inputs, growth_rate=(inputs.growth_rate or 0) + 0.03),
+        )
+        record(
+            "Operating margin",
+            "Operating margin 2 percentage points either side",
+            replace(inputs, operating_margin=inputs.operating_margin - 0.02),
+            replace(inputs, operating_margin=inputs.operating_margin + 0.02),
+        )
     record(
         "Discount rate",
         "Cost of capital 1 percentage point either side",

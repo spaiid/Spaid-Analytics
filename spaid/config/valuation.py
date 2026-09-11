@@ -150,6 +150,11 @@ class ScenarioAssumptions:
     # Probability weight used when collapsing the three scenarios to a
     # midpoint. Deliberately not uniform: the base case should dominate.
     probability: float
+    # Which end of the analyst range this scenario takes when the projection is
+    # anchored to consensus. The spread between analysts is a better bear and
+    # bull case than a multiplier chosen in advance, because it is a
+    # disagreement that actually exists.
+    consensus_side: str = "mid"  # low | mid | high
 
 
 @dataclass(frozen=True)
@@ -166,14 +171,29 @@ class DcfSpec:
     sales_to_capital_floor: float = 0.8
     sales_to_capital_cap: float = 6.0
     sales_to_capital_default: float = 2.0
-    # Share-based compensation is a real cost to existing owners. Treating it as
-    # non-cash (as many models do) systematically overvalues the equity.
+    # Share-based compensation is a real cost to existing owners. The starting
+    # margin is GAAP, so the cost is already charged; leaving this true simply
+    # keeps it that way. Setting it false adds the expense back, which is the
+    # non-GAAP view and systematically overvalues the companies that use it most.
     treat_sbc_as_expense: bool = True
     # Expected annual net dilution applied beyond buybacks, floored at zero.
     max_dilution_rate: float = 0.05
     # Terminal value may not exceed this share of total value without the
     # estimate being flagged as terminal-value dependent.
     terminal_share_warning: float = 0.80
+    # How far the projection's first year may disagree with reported free cash
+    # flow, as a fraction of revenue, before the projection is treated as
+    # describing a different company. A sign flip alone is not enough: a
+    # genuinely investing business can dip negative. A sign flip worth a tenth
+    # of revenue is an assumption error.
+    fcf_contradiction_threshold: float = 0.10
+    # Anchoring the near-term projection to consensus needs enough analysts for
+    # the consensus to mean anything.
+    consensus_min_analysts: int = 5
+    # How far above the company's current operating margin a consensus-implied
+    # margin may sit before it is treated as an estimate error rather than an
+    # expectation. Expressed in margin points.
+    consensus_margin_cap_pp: float = 0.25
     discount: DiscountRateSpec = field(default_factory=DiscountRateSpec)
     scenarios: tuple[ScenarioAssumptions, ...] = (
         ScenarioAssumptions(
@@ -184,6 +204,7 @@ class DcfSpec:
             terminal_growth_adjustment=-0.010,
             discount_rate_adjustment=+0.015,
             probability=0.25,
+            consensus_side="low",
         ),
         ScenarioAssumptions(
             label="base",
@@ -202,6 +223,7 @@ class DcfSpec:
             terminal_growth_adjustment=+0.005,
             discount_rate_adjustment=-0.010,
             probability=0.25,
+            consensus_side="high",
         ),
     )
 
@@ -225,6 +247,15 @@ class ComparablesSpec:
     # multiple is only fair if the peer is actually comparable.
     quality_adjustment: bool = True
     max_adjustment: float = 0.30  # cap the size of that adjustment
+    # Quantiles of the peer multiple distribution used to express the spread of
+    # defensible answers. Where comparables is the only method that ran, these
+    # are the honest bear and bull cases: the peer group itself disagrees, and
+    # by this much.
+    spread_quantiles: tuple[float, float] = (0.25, 0.75)
+    # How far one multiple's answer may sit from the median of the others
+    # before it is treated as arithmetic on a near-zero denominator rather than
+    # a different opinion about value.
+    max_multiple_ratio: float = 4.0
 
 
 @dataclass(frozen=True)
