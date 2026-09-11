@@ -1,0 +1,60 @@
+/* ==========================================================================
+   Opportunities view — layout only. Every colour is an existing token from
+   tokens.css; no new hues are introduced here.
+   ========================================================================== */
+
+/* The ranked table is wide on purpose: 16 columns of evidence. Below its
+   natural width it scrolls horizontally inside .table-wrap rather than
+   crushing the numerals. */
+.opp-table table.data { min-width: 1160px; }
+
+.opp-ticker { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.opp-reason {
+  font-size: 11px; color: var(--text-muted);
+  max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Two-line numeric cell: figure above, the server's label below. */
+.cell-stack { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; line-height: 1.25; }
+.cell-stack .cell-sub { font-size: 11px; color: var(--text-muted); }
+
+/* Score changes reuse the design system's delta treatment: arrow + sign + colour. */
+td .stat-delta { justify-content: flex-end; }
+
+/* ----- filter bar ----- */
+.opp-filters { align-items: flex-end; row-gap: 12px; }
+.filter-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.filter-field > .t-label { line-height: 1; }
+
+.range-control { min-width: 210px; }
+.range-control input[type="range"] {
+  width: 132px; accent-color: var(--series-1); background: none; cursor: pointer;
+}
+.range-value { font-variant-numeric: tabular-nums; color: var(--text-primary); min-width: 22px; text-align: right; }
+
+.result-count { margin-left: auto; font-size: 12px; color: var(--text-muted); text-align: right; max-width: 46ch; }
+.result-count strong { color: var(--text-primary); font-weight: 550; }
+
+/* ----- band distribution chips ----- */
+.band-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.band-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 32px; padding: 3px 10px 3px 4px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.band-chip:hover { border-color: var(--border-strong); background: var(--surface-3); }
+.band-chip[aria-pressed="true"] { background: var(--wash-strong); border-color: var(--border-strong); }
+.band-chip-count { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text-primary); font-weight: 550; }
+.band-chip[aria-pressed="false"] .band-chip-count { color: var(--text-secondary); font-weight: 500; }
+
+/* ----- charts row ----- */
+.opp-charts { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 1180px) { .opp-charts { grid-template-columns: minmax(0, 1fr); } }
+
+.opp-notes { display: flex; flex-direction: column; gap: 7px; margin-top: 14px; }
+
+@media (max-width: 900px) {
+  .result-count { margin-left: 0; text-align: left; }
+}

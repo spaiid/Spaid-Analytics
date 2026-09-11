@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spaid Analytics</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%233987e5'/></svg>">
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-name">Spaid Analytics</div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <div class="nav-label">Decide</div>
+      <button class="nav-item is-active" data-view="picks">
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 11.5 6 7l3 3 5-5.5"/><path d="M10.5 4.5H14V8"/></svg>
+        Today&rsquo;s picks
+      </button>
+      <button class="nav-item" data-view="screener">
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12M4 8h8M6.5 12h3"/></svg>
+        Screener
+      </button>
+      <button class="nav-item" data-view="ticker">
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+        Ticker detail
+      </button>
+
+      <div class="nav-label">Verify</div>
+      <button class="nav-item" data-view="signals">
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13V8M6 13V4M10 13V6M14 13V2"/></svg>
+        Signal quality
+      </button>
+      <button class="nav-item" data-view="backtest">
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12.5 5.5 8l3 2.5L14 4"/><path d="M2 14h12"/></svg>
+        Backtest
+      </button>
+
+      <div class="nav-label">Operate</div>
+      <button class="nav-item" data-view="data">
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="8" cy="4" rx="5.5" ry="2.2"/><path d="M2.5 4v8c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2V4"/><path d="M2.5 8c0 1.2 2.5 2.2 5.5 2.2s5.5-1 5.5-2.2"/></svg>
+        Data health
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div id="foot-asof">—</div>
+      <div id="foot-model" class="muted">—</div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <h1 id="view-title">Today&rsquo;s picks</h1>
+      <div class="topbar-spacer"></div>
+      <div id="run-status" class="control" style="display:none"></div>
+      <button class="btn" id="btn-theme" title="Toggle light / dark">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3.2"/><path d="M8 1v1.6M8 13.4V15M15 8h-1.6M2.6 8H1M12.9 3.1l-1.1 1.1M4.2 11.8l-1.1 1.1M12.9 12.9l-1.1-1.1M4.2 4.2 3.1 3.1"/></svg>
+      </button>
+      <button class="btn btn-primary" id="btn-refresh">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 8a6 6 0 1 1-1.8-4.3"/><path d="M14 2v3.5h-3.5"/></svg>
+        Run pipeline
+      </button>
+    </header>
+
+    <main class="content">
+      <section class="view is-active" id="view-picks"></section>
+      <section class="view" id="view-screener"></section>
+      <section class="view" id="view-ticker"></section>
+      <section class="view" id="view-signals"></section>
+      <section class="view" id="view-backtest"></section>
+      <section class="view" id="view-data"></section>
+    </main>
+  </div>
+</div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

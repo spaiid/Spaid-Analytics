@@ -1,0 +1,70 @@
+/* ==========================================================================
+   charts.css — mark specs ported from spaid/api/web/style.css + charts.js.
+   line 2px round cap/join · bar <=24px with a 4px rounded data-end, square at
+   the baseline · markers r>=4 with a 2px surface ring · area fill ~10% ·
+   hairline solid grid · hit targets >=24px · legend for >=2 series ·
+   every chart ships a table-view twin.
+   ========================================================================== */
+
+.chart { position: relative; width: 100%; min-width: 0; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart .grid-line { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
+.chart .axis-line { stroke: var(--axis); stroke-width: 1; shape-rendering: crispEdges; }
+.chart .tick-text { fill: var(--text-muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.chart .axis-title { fill: var(--text-muted); font-size: 10.5px; }
+.chart .series-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .end-label { font-size: 11px; font-weight: 600; fill: var(--text-primary); }
+.chart .value-label { font-size: 10.5px; fill: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.chart .crosshair { stroke: var(--text-muted); stroke-width: 1; opacity: 0.55; shape-rendering: crispEdges; }
+.chart .hover-dot { stroke: var(--surface-1); stroke-width: 2; }
+.chart .hit { fill: transparent; cursor: crosshair; }
+.chart .bar-hit { fill: transparent; cursor: pointer; }
+.chart .mark { transition: filter 120ms ease; }
+.chart .mark:hover { filter: brightness(1.16); }
+.chart .zero-line { stroke: var(--axis); stroke-width: 1; shape-rendering: crispEdges; }
+.chart .empty-text { fill: var(--text-muted); font-size: 12px; }
+
+.chart-frame { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.chart-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.chart-title { font-size: 13.5px; font-weight: 600; margin: 0; }
+.chart-sub { font-size: 12px; color: var(--text-muted); margin: 0; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.legend-key { width: 14px; height: 2.5px; border-radius: 2px; flex-shrink: 0; }
+.legend-key.rect { width: 10px; height: 10px; border-radius: 2px; }
+.legend-item.is-muted { opacity: 0.45; }
+
+.chart-tooltip {
+  position: absolute; pointer-events: none; z-index: 50;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px; min-width: 130px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.34);
+  font-size: 12px; opacity: 0; transition: opacity 90ms ease;
+}
+.chart-tooltip.is-visible { opacity: 1; }
+.tooltip-title { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.tooltip-row { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+.tooltip-key { width: 12px; height: 2.5px; border-radius: 2px; flex-shrink: 0; }
+/* values lead, labels follow */
+.tooltip-val { font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; margin-left: auto; }
+.tooltip-name { color: var(--text-secondary); }
+
+/* the table-view twin every chart ships */
+.chart-toggle { display: flex; gap: 4px; margin-left: auto; }
+.chart-toggle button {
+  font-size: 11px; padding: 4px 8px; border-radius: 3px; color: var(--text-muted); min-height: 24px;
+}
+.chart-toggle button:hover { color: var(--text-primary); background: var(--wash); }
+.chart-toggle button[aria-pressed="true"] { background: var(--surface-3); color: var(--text-primary); }
+.chart-table { max-height: 320px; overflow-y: auto; }
+
+/* range bar (fair value) */
+.rangebar .band { opacity: 0.10; }
+.rangebar .band-stroke { fill: none; stroke: var(--series-1); stroke-width: 1; opacity: 0.5; }
+.rangebar .marker-label { font-size: 10.5px; fill: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.rangebar .marker-name { font-size: 10.5px; fill: var(--text-muted); }
+.rangebar .price-line { stroke: var(--text-primary); stroke-width: 2; }
+.rangebar .mid-line { stroke: var(--axis); stroke-width: 1; stroke-dasharray: 4 3; }

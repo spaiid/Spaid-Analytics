@@ -1,8 +1,20 @@
 __pycache__/
 *.pyc
 .env
-.venv
-poetry.lock
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.DS_Store
+
+# Local data store: raw provider payloads, curated parquet, derived artifacts.
+# Everything here is reproducible from the providers; none of it belongs in git.
+data/
 _data/
 .parquet-temp/
-.DS_Store
+
+# Frontend build output and dependencies
+web/node_modules/
+web/dist/
+spaid/api/static/

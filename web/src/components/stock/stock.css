@@ -1,0 +1,118 @@
+/* ==========================================================================
+   stock.css — layout for the stock detail view only.
+   Tokens only: no new colours, no new radii. Every rule here is composition.
+   ========================================================================== */
+
+/* ----- header ----- */
+.sd-head {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 2.1fr);
+  gap: 18px 24px;
+  align-items: start;
+}
+.sd-ident { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sd-ticker { font-size: 34px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; color: var(--text-primary); }
+.sd-name { font-size: 15px; color: var(--text-primary); font-weight: 550; }
+.sd-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sd-meta .tag { display: inline-flex; align-items: center; gap: 6px; }
+.sd-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.sd-tiles .stat { min-width: 0; }
+.sd-tile-meter { margin-top: 9px; }
+
+/* ----- generic pieces ----- */
+.sd-sub { font-size: 12px; color: var(--text-muted); }
+.sd-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; font-size: 12.5px; }
+.sd-kv dt { color: var(--text-muted); }
+.sd-kv dd { margin: 0; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.sd-note {
+  font-size: 12px; color: var(--text-muted); line-height: 1.5;
+  border-left: 2px solid var(--border-strong); padding: 2px 0 2px 10px; margin-top: 12px;
+}
+.sd-sum {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px;
+  font-size: 12.5px; color: var(--text-secondary);
+  background: var(--wash); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+  font-variant-numeric: tabular-nums;
+}
+.sd-sum .sd-sum-eq { color: var(--text-primary); font-weight: 600; }
+.sd-section-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted); font-weight: 600; margin: 0 0 10px;
+}
+
+/* ----- fair value ----- */
+.sd-fv-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.sd-swing { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.sd-swing-track {
+  position: relative; width: 84px; height: 10px;
+  background: var(--surface-3); border-radius: 2px; overflow: hidden; flex-shrink: 0;
+}
+.sd-swing-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--seq-400); border-radius: 2px 4px 4px 2px; }
+.sd-swing-val { font-variant-numeric: tabular-nums; min-width: 52px; text-align: right; }
+.sd-caveats { display: flex; flex-direction: column; gap: 8px; }
+.sd-caveat {
+  display: flex; gap: 9px; align-items: flex-start;
+  font-size: 12.5px; color: var(--text-secondary); line-height: 1.5;
+}
+.sd-caveat .sd-caveat-icon { flex-shrink: 0; margin-top: 2px; color: var(--warning); }
+
+/* ----- category breakdown ----- */
+.sd-cats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.sd-cat {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.sd-cat.is-open { border-color: var(--border-strong); }
+.sd-cat-head {
+  display: flex; flex-direction: column; gap: 10px; width: 100%;
+  padding: 14px 16px; text-align: left;
+}
+.sd-cat-head:hover { background: var(--wash); }
+.sd-cat-head .pill { align-self: flex-start; }
+.sd-cat-top { display: flex; align-items: baseline; gap: 8px; }
+.sd-cat-label { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.sd-cat-score { margin-left: auto; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.sd-cat-chevron { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 11.5px; }
+.sd-cat-facts { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.sd-cat-body { border-top: 1px solid var(--border); padding: 14px 16px 4px; background: var(--surface-1); }
+.sd-metric-group + .sd-metric-group { margin-top: 18px; }
+.sd-metric-group.is-na { opacity: 0.72; }
+.sd-metric-group.is-na table.data tbody td { font-style: italic; }
+.sd-group-note { font-size: 11.5px; color: var(--text-muted); margin: 0 0 8px; line-height: 1.45; }
+
+/* ----- panels ----- */
+.sd-panels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.sd-evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.sd-list { display: flex; flex-direction: column; gap: 9px; }
+.sd-list li { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
+.sd-list li .sd-list-icon { flex-shrink: 0; margin-top: 2px; }
+.sd-list-good .sd-list-icon { color: var(--good); }
+.sd-list-warning .sd-list-icon { color: var(--warning); }
+.sd-list-serious .sd-list-icon { color: var(--serious); }
+.sd-list-info .sd-list-icon { color: var(--series-1); }
+.sd-empty-line { font-size: 12.5px; color: var(--text-muted); }
+
+/* ----- charts ----- */
+.sd-trends { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+
+@media (max-width: 1180px) {
+  .sd-head { grid-template-columns: minmax(0, 1fr); }
+  .sd-panels { grid-template-columns: minmax(0, 1fr); }
+  .sd-trends { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .sd-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sd-fv-facts { grid-template-columns: minmax(0, 1fr); }
+  .sd-cats { grid-template-columns: minmax(0, 1fr); }
+  .sd-evidence { grid-template-columns: minmax(0, 1fr); }
+  .sd-ticker { font-size: 28px; }
+}
+
+/* ----- odds and ends ----- */
+.sd-banner-inset { margin-bottom: 12px; }
+table.data tbody tr.is-muted-row td { color: var(--text-muted); }
+.sd-back { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); }
+.sd-back:hover { color: var(--text-primary); }
+.sd-error-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.sd-cat.is-open { grid-column: 1 / -1; }
