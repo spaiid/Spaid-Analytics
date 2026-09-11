@@ -24,6 +24,7 @@ from pathlib import Path
 import polars as pl
 
 from spaid.config.settings import ARTIFACTS, CURATED, DERIVED, RAW
+from spaid.storage import migrations
 from spaid.storage.schema import ALL_TABLES, SCHEMA_VERSION, TableSpec, validate
 
 log = logging.getLogger(__name__)
@@ -137,11 +138,13 @@ def write(
 
 
 def read(name: str, *, required: bool = False) -> pl.DataFrame | None:
-    """Read a table, checking that it still matches its declared schema.
+    """Read a table, migrating it forward and checking its declared schema.
 
-    A schema drift raises rather than returning a frame the caller will
-    misinterpret. `required=True` turns a missing table into an error too, for
-    the steps that genuinely cannot proceed without it.
+    Declared migrations are applied first and written back, so a rename costs one
+    read rather than being paid forever or forcing a refetch. Anything still
+    mismatched after that raises rather than returning a frame the caller will
+    misinterpret: a column of nulls where a number should be is worse than an
+    error, because it propagates silently into a recommendation.
     """
     path = path_for(name)
     if not path.exists():
@@ -150,8 +153,26 @@ def read(name: str, *, required: bool = False) -> pl.DataFrame | None:
                 f"table {name!r} has not been built yet (expected at {path})"
             )
         return None
+
     df = pl.read_parquet(path)
+    migrated, applied = migrations.apply(df, name)
+    df = write_migrated(migrated, name) if applied else migrated
     return validate(df, _spec(name), strict=False)
+
+
+def write_migrated(df: pl.DataFrame, name: str) -> pl.DataFrame:
+    """Persist a migrated frame, keeping the read path working if the write fails.
+
+    A migration that cannot be written back is still a correct read: the caller
+    gets the migrated data and the next read repeats the work. Failing the read
+    because the disk is full would be worse.
+    """
+    try:
+        write(df, name, note=f"migrated to schema version {SCHEMA_VERSION}", strict=False)
+    except Exception as exc:
+        log.warning("could not persist the migrated %s table (%s); it will migrate again "
+                    "on the next read", name, exc)
+    return df
 
 
 def scan(name: str) -> pl.LazyFrame | None:
@@ -187,6 +208,23 @@ def is_fresh(name: str, max_age_hours: float) -> bool:
     return age is not None and age < max_age_hours
 
 
+def is_current_schema(name: str) -> bool:
+    """Whether the stored copy of `name` still matches its declared schema."""
+    path = path_for(name)
+    if not path.exists():
+        return True
+    try:
+        stored = pl.read_parquet_schema(path)
+    except Exception:
+        return False
+    declared = _spec(name).schema
+    if all(col in stored for col in declared):
+        return True
+    # A table with a pending migration is not stale; it is one read away from
+    # being current.
+    return bool(migrations.pending(name, set(stored)))
+
+
 def upsert(
     df: pl.DataFrame,
     name: str,
@@ -199,9 +237,24 @@ def upsert(
     Used for tables that accumulate forward -- estimate snapshots, journal
     outcomes -- where a full rebuild would throw away history that the provider
     can no longer supply.
+
+    When the stored copy predates a schema change it cannot be merged with, so it
+    is replaced and that is logged rather than silently swallowed. This is safe
+    only because every table reaching this path is refetchable; append-only
+    tables use `append`, which refuses.
     """
     spec = _spec(name)
     incoming = validate(df, spec, strict=False)
+
+    if not is_current_schema(name):
+        log.warning(
+            "%s: the stored table predates the current schema and cannot be merged; "
+            "replacing it with the freshly fetched data. Any history the provider no "
+            "longer supplies is lost, which is why this is a warning and not silent.",
+            name,
+        )
+        return write(incoming, name, source=source, note=note)
+
     current = read(name)
     if current is None or current.is_empty():
         return write(incoming, name, source=source, note=note)

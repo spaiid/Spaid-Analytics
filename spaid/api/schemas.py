@@ -205,6 +205,11 @@ class OpportunityRow(BaseModel):
     confidence_label: str | None = None
     valuation_class: str | None = None
     valuation_label: str | None = None
+    # A compact form for the ranked table, where "Insufficient confidence to
+    # classify" does not fit in a column. Supplied by the API rather than
+    # truncated by the client, because shortening a verdict is still deciding
+    # what it says.
+    valuation_label_short: str | None = None
     upside: float | None = None
     fair_value_low: float | None = None
     fair_value_high: float | None = None

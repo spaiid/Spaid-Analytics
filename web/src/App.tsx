@@ -32,6 +32,8 @@ import { TopBar } from './components/layout/TopBar';
 import { usePipeline } from './hooks/usePipeline';
 import { dateTime, humanize } from './lib/format';
 import { useTheme } from './lib/theme';
+// Loaded after the four base stylesheets in main.tsx, so it settles ties.
+import './styles/shell.css';
 
 import { HealthView } from './views/HealthView';
 import { NotFoundView, PlaceholderView } from './views/PlaceholderView';

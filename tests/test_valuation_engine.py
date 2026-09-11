@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import numpy as np
 import pytest
 
-from spaid.config.scoring import BusinessModel
 from spaid.config.valuation import ClassificationSpec, ValuationClass, get_valuation_spec
 from spaid.valuation.engine import (
     CompanyValuationInputs,

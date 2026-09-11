@@ -1,0 +1,16 @@
+/* ==========================================================================
+   shell.css — layout corrections owned by the app shell.
+   Loaded last (imported from App.tsx) so it settles ties with components.css.
+   ========================================================================== */
+
+/*
+ * A table wider than its card scrolls inside .table-wrap. Without a position
+ * on that wrapper, Chrome propagates the table's overflow all the way to the
+ * document, so the whole page gains a horizontal scrollbar and the sidebar and
+ * top bar scroll away with it. Making the wrapper a positioned box keeps the
+ * overflow where it belongs — verified at 1280, 1024 and 768px.
+ */
+.table-wrap { position: relative; }
+
+/* Belt and braces: nothing in the shell may push the page sideways. */
+.app { overflow-x: clip; }

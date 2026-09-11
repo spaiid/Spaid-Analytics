@@ -6,7 +6,7 @@ export type { OpportunityHeaderProps } from './OpportunityHeader';
 export { OpportunityFilters } from './OpportunityFilters';
 export type { OpportunityFiltersProps } from './OpportunityFilters';
 
-export { OpportunitiesTable } from './OpportunitiesTable';
+export { OpportunitiesTable, DEFAULT_OPPORTUNITY_SORT } from './OpportunitiesTable';
 export type { OpportunitiesTableProps } from './OpportunitiesTable';
 
 export { OpportunityCharts, ScoreDistributionChart, SectorScoreChart } from './OpportunityCharts';

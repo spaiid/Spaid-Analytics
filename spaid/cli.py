@@ -216,7 +216,7 @@ def cmd_explain(args) -> int:
         for m in c.metrics:
             if m.status == "scored":
                 print(
-                    f"   {m.label:36} {str(m.display_value):>10}  "
+                    f"   {m.label:36} {m.display_value!s:>10}  "
                     f"score {m.score:5.1f}  w {m.weight:.2f}  "
                     f"vs {m.peer_count} {m.peer_basis} peers (median {m.peer_median_display})"
                 )

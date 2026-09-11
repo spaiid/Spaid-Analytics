@@ -193,7 +193,7 @@ def earnings_surprise(
 
     as_of = as_of or date.today()
     reported = events.filter(
-        (~pl.col("is_future")) & pl.col("surprise_pct").is_not_null() & (pl.col("event_date") <= as_of)
+        (~pl.col("is_future")) & pl.col("surprise").is_not_null() & (pl.col("event_date") <= as_of)
     )
     if reported.is_empty():
         return empty
@@ -202,8 +202,8 @@ def earnings_surprise(
         reported.sort(["company_id", "event_date"])
         .group_by("company_id")
         .agg(
-            pl.col("surprise_pct").tail(quarters).mean().alias("earnings_surprise"),
-            (pl.col("surprise_pct").tail(quarters) > 0).mean().cast(pl.Float64).alias(
+            pl.col("surprise").tail(quarters).mean().alias("earnings_surprise"),
+            (pl.col("surprise").tail(quarters) > 0).mean().cast(pl.Float64).alias(
                 "surprise_hit_rate"
             ),
         )

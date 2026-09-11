@@ -43,6 +43,9 @@ export { SourcesTable } from './SourcesTable';
 export type { SourcesTableProps } from './SourcesTable';
 
 export {
+  axisDateFormatter,
+  confidenceFraction,
+  confidenceText,
   formatByUnit,
   metricValueText,
   metricMedianText,

@@ -291,7 +291,10 @@ EARNINGS_EVENTS = TableSpec(
         "is_future": pl.Boolean,
         "eps_estimate": pl.Float64,
         "eps_actual": pl.Float64,
-        "surprise_pct": pl.Float64,
+        # A fraction, not percentage points: 0.05 is a 5% beat. Every ratio in
+        # this schema is a fraction, and the one exception cost a metric that
+        # displayed a 5% average surprise as 512%.
+        "surprise": pl.Float64,
         "source": pl.Utf8,
         "collected_at": pl.Datetime("us", "UTC"),
     },

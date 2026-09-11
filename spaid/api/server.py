@@ -73,7 +73,7 @@ def _run_pipeline(*, full: bool) -> None:
             log.info("pipeline: %s", label)
             step()
         _pipeline_state.update({"stage": "Complete", "progress": 1.0})
-    except Exception as exc:  # noqa: BLE001 - surfaced to the interface, not swallowed
+    except Exception as exc:
         log.exception("pipeline failed")
         _pipeline_state.update(
             {

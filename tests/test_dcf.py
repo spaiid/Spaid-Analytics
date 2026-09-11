@@ -11,7 +11,6 @@ be checked against closed-form arithmetic, so it is checked exactly.
 from __future__ import annotations
 
 import math
-from dataclasses import replace
 
 import pytest
 

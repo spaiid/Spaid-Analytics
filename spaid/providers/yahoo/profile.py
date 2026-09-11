@@ -73,7 +73,7 @@ def fetch_snapshot(
         ticker = r["ticker"]
         try:
             info = yf.Ticker(ticker).info or {}
-        except Exception as exc:  # noqa: BLE001 - one bad ticker must not stop the run
+        except Exception as exc:
             failures += 1
             log.debug("%s: snapshot failed (%s)", ticker, type(exc).__name__)
             continue

@@ -58,7 +58,7 @@ def _frame_rows(df, period_index_name: str = "period") -> dict[str, dict]:
         return {}
     try:
         return {str(idx): row.to_dict() for idx, row in df.iterrows()}
-    except Exception:  # noqa: BLE001 - the shape varies by yfinance version
+    except Exception:
         return {}
 
 
@@ -83,7 +83,7 @@ def fetch_for_ticker(
         eps = _frame_rows(tk.earnings_estimate)
         rev = _frame_rows(tk.revenue_estimate)
         revisions = _frame_rows(tk.eps_revisions)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.debug("%s: no estimate frames (%s)", ticker, type(exc).__name__)
         eps, rev, revisions = {}, {}, {}
 
@@ -121,7 +121,7 @@ def fetch_for_ticker(
 
     try:
         hist = tk.get_earnings_dates(limit=24)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.debug("%s: no earnings dates (%s)", ticker, type(exc).__name__)
         hist = None
 
@@ -132,15 +132,28 @@ def fetch_for_ticker(
             except AttributeError:
                 continue
             actual = _clean(row.get("Reported EPS"))
+            estimate = _clean(row.get("EPS Estimate"))
+            # Computed from the two raw figures rather than taken from the
+            # provider's own surprise column, which arrives in percentage points
+            # while every other ratio in this system is a fraction. Deriving it
+            # removes the ambiguity at the source instead of relying on a
+            # conversion that has to be remembered at every later step.
+            #
+            # A surprise beyond tenfold describes an estimate near zero rather
+            # than the company, so it is capped rather than allowed to dominate
+            # a cross-sectional ranking.
+            surprise = None
+            if actual is not None and estimate is not None and abs(estimate) > 1e-9:
+                surprise = max(min((actual - estimate) / abs(estimate), 10.0), -10.0)
             events.append(
                 {
                     "company_id": company_id,
                     "ticker": ticker,
                     "event_date": event_date,
                     "is_future": actual is None,
-                    "eps_estimate": _clean(row.get("EPS Estimate")),
+                    "eps_estimate": estimate,
                     "eps_actual": actual,
-                    "surprise_pct": _clean(row.get("Surprise(%)")),
+                    "surprise": surprise,
                     "source": SOURCE,
                     "collected_at": collected_at,
                 }
@@ -181,7 +194,7 @@ def fetch_estimates(
                 as_of=as_of,
                 collected_at=collected_at,
             )
-        except Exception as exc:  # noqa: BLE001 - one bad ticker must not stop the run
+        except Exception as exc:
             failures += 1
             log.debug("%s: estimates failed (%s)", r["ticker"], exc)
             continue

@@ -15,7 +15,7 @@ Design notes that keep the numbers honest:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 
 import numpy as np
 import polars as pl

@@ -10,8 +10,6 @@ They skip when the store is empty, so a fresh clone does not show red.
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 import polars as pl
 import pytest
 

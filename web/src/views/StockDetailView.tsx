@@ -150,9 +150,10 @@ export function StockDetailView({ ticker, refreshToken = null }: StockDetailView
 
       <div className="sd-panels">
         <RiskPanel risk={detail.risk} ticker={detail.ticker} />
-        <ValueTrapPanel valueTrap={detail.value_trap} ticker={detail.ticker} />
         <ConfidencePanel confidence={detail.confidence} ticker={detail.ticker} />
       </div>
+
+      <ValueTrapPanel valueTrap={detail.value_trap} ticker={detail.ticker} />
 
       <EvidenceLists detail={detail} />
 

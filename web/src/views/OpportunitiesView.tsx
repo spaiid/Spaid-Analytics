@@ -13,8 +13,10 @@ import type { OpportunitiesResponse, OpportunityRow } from '../api/types';
 import * as fmt from '../lib/format';
 import { useNavigate } from '../lib/router';
 import { Card, EmptyState, ErrorState, Skeleton, SkeletonTable } from '../components/ui';
+import type { SortState } from '../components/ui';
 import {
   ALL,
+  DEFAULT_OPPORTUNITY_SORT,
   EMPTY_FILTERS,
   OpportunitiesTable,
   OpportunityCharts,
@@ -70,6 +72,8 @@ export function OpportunitiesView({
   const navigate = useNavigate();
   const result = useApi<OpportunitiesResponse>(apiPaths.opportunities());
   const [filters, setFilters] = useState<OpportunityFilterState>(EMPTY_FILTERS);
+  // Held here, not in the table, so an empty filter result cannot reset it.
+  const [sort, setSort] = useState<SortState>(DEFAULT_OPPORTUNITY_SORT);
 
   // Re-read after a pipeline run rewrites the store.
   const reloadRef = useRef(result.reload);
@@ -209,7 +213,13 @@ export function OpportunitiesView({
             action={filtersActive ? { label: 'Clear filters', onClick: reset } : undefined}
           />
         ) : (
-          <OpportunitiesTable rows={visible} bandOrder={bandOrder} onOpen={openStock} />
+          <OpportunitiesTable
+            rows={visible}
+            bandOrder={bandOrder}
+            onOpen={openStock}
+            sort={sort}
+            onSortChange={setSort}
+          />
         )}
 
         {response.notes.length > 0 && (

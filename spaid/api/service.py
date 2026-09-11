@@ -50,6 +50,17 @@ VALUATION_CLASS_LABELS = {
     "insufficient_confidence": "Insufficient confidence to classify",
 }
 
+# Compact forms for dense table cells. The full label is what the detail view
+# shows; this is what fits in a column.
+VALUATION_CLASS_SHORT = {
+    "significantly_undervalued": "Very undervalued",
+    "undervalued": "Undervalued",
+    "fairly_valued": "Fairly valued",
+    "overvalued": "Overvalued",
+    "significantly_overvalued": "Very overvalued",
+    "insufficient_confidence": "Not classified",
+}
+
 STATUS_DETAIL = {
     "scored": None,
     "missing": "No data available for this metric.",
@@ -253,6 +264,9 @@ def get_opportunities(limit: int | None = None) -> S.OpportunitiesResponse:
                 confidence_label=r.get("confidence_label"),
                 valuation_class=r.get("classification"),
                 valuation_label=VALUATION_CLASS_LABELS.get(r.get("classification") or ""),
+                valuation_label_short=VALUATION_CLASS_SHORT.get(
+                    r.get("classification") or ""
+                ),
                 upside=r.get("upside"),
                 fair_value_low=r.get("fair_value_low"),
                 fair_value_high=r.get("fair_value_high"),

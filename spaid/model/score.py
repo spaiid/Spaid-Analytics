@@ -24,7 +24,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import polars as pl
 
-from spaid.features.registry import FEATURES, groups as feature_groups, in_group
+from spaid.features.registry import groups as feature_groups
+from spaid.features.registry import in_group
 from spaid.model.metrics import ic_by_date
 
 log = logging.getLogger(__name__)

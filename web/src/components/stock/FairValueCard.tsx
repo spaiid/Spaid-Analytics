@@ -19,7 +19,8 @@ import {
   WarningIcon,
   type Column,
 } from '../ui';
-import { DASH, currency, pct, signedPct } from '../../lib/format';
+import { DASH, currency, humanize, pct, signedPct } from '../../lib/format';
+import { confidenceText } from './metricFormat';
 
 function SwingBar({ value, max }: { value: number | null; max: number }) {
   const known = typeof value === 'number' && Number.isFinite(value);
@@ -34,7 +35,7 @@ function SwingBar({ value, max }: { value: number | null; max: number }) {
   );
 }
 
-function methodColumns(): Array<Column<MethodValue>> {
+function methodColumns(usedWeight: number): Array<Column<MethodValue>> {
   return [
     {
       key: 'label',
@@ -60,7 +61,21 @@ function methodColumns(): Array<Column<MethodValue>> {
       key: 'weight',
       header: 'Weight',
       numeric: true,
+      title: 'The weight the valuation spec declares for this method.',
       render: (row) => (row.used ? pct(row.weight, 0) : <span className="muted">{DASH}</span>),
+    },
+    {
+      key: 'effective',
+      header: 'Effective',
+      numeric: true,
+      title:
+        'Declared weight divided by the weights of the methods that actually ran — the share this method really had in the blend.',
+      render: (row) =>
+        row.used && usedWeight > 0 ? (
+          <span className="tnum">{pct(row.weight / usedWeight, 0)}</span>
+        ) : (
+          <span className="muted">{DASH}</span>
+        ),
     },
     {
       key: 'value',
@@ -91,7 +106,7 @@ function scenarioColumns(): Array<Column<ScenarioValue>> {
       header: 'Scenario',
       render: (row) => (
         <span>
-          <span className="strong">{row.label}</span>
+          <span className="strong">{humanize(row.label)}</span>
           {row.summary && <div className="sd-sub">{row.summary}</div>}
         </span>
       ),
@@ -246,7 +261,7 @@ export function FairValueCard({ ticker, fairValue }: FairValueCardProps) {
           value={
             <ValueOrMissing
               value={fairValue.confidence}
-              format={(value) => pct(value, 0)}
+              format={(value) => confidenceText(value)}
               label="Valuation confidence"
               status="missing"
               detail="The valuation engine reported no confidence for this estimate."
@@ -267,7 +282,7 @@ export function FairValueCard({ ticker, fairValue }: FairValueCardProps) {
 
       <h3 className="sd-section-title">Methods</h3>
       <DataTable<MethodValue>
-        columns={methodColumns()}
+        columns={methodColumns(usedWeight)}
         rows={fairValue.methods}
         rowKey={(row) => row.method}
         ariaLabel={`Valuation methods for ${ticker}`}
@@ -275,13 +290,14 @@ export function FairValueCard({ ticker, fairValue }: FairValueCardProps) {
         empty={<span className="muted">No methods were recorded for this estimate.</span>}
       />
       <p className="sd-note">
-        Weights are shown after renormalisation: {used.length} of {fairValue.methods.length} methods were used and
-        their weights sum to {pct(usedWeight, 0)}.
+        {used.length} of {fairValue.methods.length} methods ran. The weight column is the weight the valuation spec
+        declares; the blend divides by the {pct(usedWeight, 0)} that actually ran, so each surviving method&rsquo;s
+        real share is the effective column.{' '}
         {skipped.length > 0
-          ? ` The ${skipped.length} skipped ${
-              skipped.length === 1 ? 'method carries' : 'methods carry'
-            } no weight — the weight it would have held was spread across the methods that ran, so the remaining weights are larger than they would be on a full set.`
-          : ' No method was skipped.'}
+          ? `The ${skipped.length} skipped ${
+              skipped.length === 1 ? 'method was dropped from the blend' : 'methods were dropped from the blend'
+            } — never averaged in as a zero, which would have dragged the estimate down.`
+          : 'Nothing was skipped, so the declared weights and the effective weights differ only by rounding.'}
       </p>
 
       <hr className="hr" />

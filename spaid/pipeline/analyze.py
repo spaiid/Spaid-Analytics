@@ -396,7 +396,7 @@ def build_valuations(
 
         try:
             result = value_company(inputs, spec)
-        except Exception as exc:  # noqa: BLE001 - one company must not stop the run
+        except Exception as exc:
             failures += 1
             log.debug("%s: valuation failed (%s)", row["ticker"], exc)
             continue

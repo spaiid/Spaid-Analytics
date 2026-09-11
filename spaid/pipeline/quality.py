@@ -50,7 +50,7 @@ def check_all() -> list[dict]:
     ):
         try:
             warnings.extend(check())
-        except Exception as exc:  # noqa: BLE001 - a broken check must not break the page
+        except Exception as exc:
             log.warning("data-quality check %s failed: %s", check.__name__, exc)
     order = {"critical": 0, "warning": 1, "info": 2}
     warnings.sort(key=lambda w: order.get(w.severity, 3))

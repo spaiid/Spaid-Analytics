@@ -127,7 +127,7 @@ class CompanyFacts:
         except KeyError:
             log.warning("no SEC facts for CIK %d", cik)
             return None
-        except Exception as exc:  # noqa: BLE001 - network/zip errors are all recoverable
+        except Exception as exc:
             log.warning("failed reading %s: %s", member, exc)
             return None
 
@@ -145,7 +145,7 @@ class CompanyFacts:
         self._raw = None
         self._client = None
 
-    def __enter__(self) -> "CompanyFacts":
+    def __enter__(self) -> CompanyFacts:
         return self
 
     def __exit__(self, *exc) -> None:

@@ -130,6 +130,24 @@ function columns(): Array<Column<PeerRow>> {
   ];
 }
 
+/** Columns the API left entirely empty for this peer set, named so the gap is explicit. */
+const OPTIONAL_COLUMNS: ReadonlyArray<{ label: string; get: (peer: PeerRow) => number | null }> = [
+  { label: 'EV/EBIT', get: (peer) => peer.ev_ebit },
+  { label: 'FCF yield', get: (peer) => peer.fcf_yield },
+  { label: 'Revenue 1y', get: (peer) => peer.revenue_growth_1y },
+  { label: 'Op margin', get: (peer) => peer.operating_margin },
+  { label: 'Market cap', get: (peer) => peer.market_cap },
+];
+
+function emptyColumnNames(peers: PeerRow[]): string[] {
+  return OPTIONAL_COLUMNS.filter((column) =>
+    peers.every((peer) => {
+      const value = column.get(peer);
+      return value === null || !Number.isFinite(value);
+    }),
+  ).map((column) => column.label);
+}
+
 export interface PeerTableProps {
   peers: PeerRow[];
   ticker: string;
@@ -149,11 +167,26 @@ export function PeerTable({ peers, ticker }: PeerTableProps) {
     );
   }
 
+  const emptyColumns = emptyColumnNames(peers);
+  const gapNote =
+    emptyColumns.length === 0
+      ? null
+      : `${emptyColumns.join(', ')} ${
+          emptyColumns.length === 1 ? 'was' : 'were'
+        } not supplied for any company in this peer set, so ${
+          emptyColumns.length === 1 ? 'that column is' : 'those columns are'
+        } empty for everyone — not zero, and not a tie.`;
+
   return (
     <Card
       title="Peers"
       headingLevel={3}
-      subtitle="The comparison set behind the percentiles. Select a row to open that company."
+      subtitle={
+        <>
+          The comparison set behind the percentiles. Select a row to open that company.
+          {gapNote !== null && <> {gapNote}</>}
+        </>
+      }
       flush
     >
       <DataTable<PeerRow>

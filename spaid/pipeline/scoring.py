@@ -36,7 +36,6 @@ from datetime import UTC, datetime
 import polars as pl
 
 from spaid.config.scoring import (
-    BusinessModel,
     Category,
     MetricSpec,
     PeerBasis,

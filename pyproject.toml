@@ -50,4 +50,12 @@ exclude = ["legacy", ".venv", "web"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["E501", "B008"]
+ignore = [
+    "E501",   # line length is handled by the formatter
+    "B008",   # function calls in argument defaults are the FastAPI idiom
+    # Collapsing a nested conditional is usually right, but not where the two
+    # conditions test different things: the Piotroski tests read as nine
+    # numbered checks and merging their guards obscures which test is which.
+    "SIM102",
+    "RUF005",  # explicit concatenation is clearer than unpacking in these spots
+]

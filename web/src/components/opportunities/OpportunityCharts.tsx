@@ -16,6 +16,9 @@ const BIN_WIDTH = 5;
  */
 const countLabel = (value: number): string => (Number.isInteger(value) ? fmt.int(value) : '');
 
+/** Signed points, except at the axis centre where "+0.0" reads as a value. */
+const deltaLabel = (value: number): string => (value === 0 ? fmt.num(0, 1) : fmt.points(value));
+
 function NotEnough({ message }: { message: string }) {
   return <p className="muted t-small">{message}</p>;
 }
@@ -117,7 +120,7 @@ export function SectorScoreChart({ rows, onSelectSector }: SectorScoreChartProps
       subtitle={subtitle}
       horizontal
       diverging
-      valueFormat={(value) => fmt.points(value)}
+      valueFormat={deltaLabel}
       barName="Difference from the overall mean, in points"
       categoryHeader="Sector"
       onBarActivate={(_index, label) => onSelectSector(label)}

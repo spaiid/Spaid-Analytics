@@ -9,6 +9,7 @@ import type { PriceHistory } from '../../api/types';
 import { LineChart } from '../charts';
 import { Card, EmptyState } from '../ui';
 import { currency, date as fmtDate } from '../../lib/format';
+import { axisDateFormatter } from './metricFormat';
 
 function valueAt(values: number[] | undefined, index: number): number | null {
   if (!values) return null;
@@ -53,6 +54,7 @@ export function PriceHistoryCard({ ticker, priceHistory }: PriceHistoryCardProps
         ariaLabel={ariaLabel}
         subtitle={`${known.length} daily closes · ${fmtDate(first)} to ${fmtDate(last)}`}
         yFormat={(value) => currency(value, 2)}
+        xFormat={axisDateFormatter(dates)}
         height={280}
       />
     </Card>

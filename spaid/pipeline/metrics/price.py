@@ -319,7 +319,7 @@ def _apply_numeric_kernels(df: pl.DataFrame) -> pl.DataFrame:
     year = SETTINGS.trading_days_per_year
     pieces: list[pl.DataFrame] = []
 
-    for (ticker,), group in df.group_by(["ticker"], maintain_order=True):
+    for _, group in df.group_by(["ticker"], maintain_order=True):
         g = group.sort("date")
         close = g["close_adj"].to_numpy().astype(float)
         rets = g["ret_1d"].to_numpy().astype(float)

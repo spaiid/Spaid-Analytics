@@ -9,6 +9,7 @@ import type { FinancialTrend } from '../../api/types';
 import { AreaChart, seriesColor } from '../charts';
 import { Card, EmptyState } from '../ui';
 import { compactCurrency, date as fmtDate, num, pct } from '../../lib/format';
+import { axisDateFormatter } from './metricFormat';
 
 function formatterFor(unit: string): (value: number) => string {
   switch (unit) {
@@ -70,6 +71,7 @@ export function FinancialTrends({ ticker, trends }: FinancialTrendsProps) {
               subtitle={`${trend.points.length} periods · latest ${fmtDate(last)}`}
               color={seriesColor(index)}
               yFormat={format}
+              xFormat={axisDateFormatter(x)}
               xHeader="Period end"
               height={180}
             />

@@ -7,7 +7,8 @@
 
 import type { Confidence, ConfidenceComponent } from '../../api/types';
 import { Card, DataTable, EmptyState, Meter, Pill, QuestionIcon, type Column } from '../ui';
-import { pct, score as fmtScore } from '../../lib/format';
+import { pct } from '../../lib/format';
+import { confidenceFraction, confidenceText } from './metricFormat';
 
 function columns(): Array<Column<ConfidenceComponent>> {
   return [
@@ -30,8 +31,14 @@ function columns(): Array<Column<ConfidenceComponent>> {
       width: '150px',
       render: (component) => (
         <div className="score-cell">
-          <span className="score-num">{fmtScore(component.score)}</span>
-          <Meter value={component.score} label={`${component.label} confidence component`} />
+          <span className="score-num">{confidenceText(component.score)}</span>
+          <Meter
+            value={confidenceFraction(component.score)}
+            min={0}
+            max={1}
+            label={`${component.label} confidence component`}
+            valueText={confidenceText(component.score)}
+          />
         </div>
       ),
       sortValue: (component) => component.score,
@@ -72,17 +79,18 @@ export function ConfidencePanel({ confidence, ticker }: ConfidencePanelProps) {
       subtitle="How much weight the score deserves. Read it next to the score, never after it."
     >
       <div className="row" style={{ marginBottom: 10 }}>
-        <span className="stat-value is-small tnum">{fmtScore(confidence.score)}</span>
+        <span className="stat-value is-small tnum">{confidenceText(confidence.score)}</span>
         <Pill tone="neutral" icon={false}>
           {confidence.label}
         </Pill>
       </div>
       <Meter
-        value={confidence.score}
+        value={confidenceFraction(confidence.score)}
+        min={0}
+        max={1}
         label={`Confidence in the score for ${ticker}`}
-        valueText={`${fmtScore(confidence.score)} of 100, ${confidence.label}`}
+        valueText={`${confidenceText(confidence.score)}, ${confidence.label}`}
         size="lg"
-        tone="neutral"
       />
 
       <div style={{ marginTop: 14 }}>

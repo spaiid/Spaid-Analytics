@@ -40,7 +40,6 @@ import polars as pl
 
 from spaid.providers.sec.concepts import (
     ALL_CONCEPTS,
-    CONCEPT_BY_KEY,
     Aggregation,
     ConceptSpec,
     PeriodType,
@@ -611,48 +610,3 @@ def build_fundamentals(
         stats.scale_outliers,
     )
     return df
-
-
-def as_of_wide(
-    fundamentals: pl.DataFrame,
-    dates: pl.DataFrame,
-    *,
-    concepts: Sequence[str] | None = None,
-) -> pl.DataFrame:
-    """Join the latest knowable value of each concept onto a company-date frame.
-
-    `dates` must have `company_id` and `date`. The join is backward as-of on
-    `available_at`, which is what makes every downstream metric point-in-time by
-    construction rather than by convention.
-    """
-    keys = list(concepts or fundamentals["concept"].unique().sort().to_list())
-    out = dates.sort(["date", "company_id"])
-
-    for concept in keys:
-        sub = (
-            fundamentals.filter(pl.col("concept") == concept)
-            .select(
-                ["company_id", "available_at", "value", "period_end"]
-            )
-            .rename({"value": concept, "period_end": f"_{concept}__period_end"})
-            .sort("available_at")
-        )
-        if sub.is_empty():
-            spec = CONCEPT_BY_KEY.get(concept)
-            dtype = pl.Float64 if spec else pl.Float64
-            out = out.with_columns(
-                pl.lit(None, dtype=dtype).alias(concept),
-                pl.lit(None, dtype=pl.Date).alias(f"_{concept}__period_end"),
-            )
-            continue
-        out = out.sort("date").join_asof(
-            sub,
-            left_on="date",
-            right_on="available_at",
-            by="company_id",
-            strategy="backward",
-        )
-        if "available_at" in out.columns:
-            out = out.drop("available_at")
-
-    return out.sort(["date", "company_id"])

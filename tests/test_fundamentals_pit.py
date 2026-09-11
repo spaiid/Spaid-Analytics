@@ -402,6 +402,7 @@ class TestScaleOutliers:
         kept, dropped = reject_scale_outliers(self._series(values))
         assert len(dropped) == 1
         assert dropped[0].value == pytest.approx(9.8e10)
+        assert all(f.value == pytest.approx(6.0e7) for f in kept)
 
     def test_ordinary_growth_is_never_rejected(self):
         """A company doubling over five years must survive the guard."""
@@ -425,7 +426,7 @@ class TestScaleOutliers:
         from spaid.pipeline.fundamentals import reject_scale_outliers
 
         values = [1.0e9] * 8 + [-9.0e8]
-        kept, dropped = reject_scale_outliers(self._series(values))
+        _, dropped = reject_scale_outliers(self._series(values))
         assert dropped == []
 
     def test_thin_series_are_left_alone(self):

@@ -24,7 +24,7 @@ import {
   type Column,
   type StatusTone,
 } from '../components/ui';
-import { ageHours, dateTime, humanize, int, pct } from '../lib/format';
+import { ageHours, date, dateTime, humanize, int, pct } from '../lib/format';
 
 /* ------------------------------------------------------------- status copy */
 
@@ -193,14 +193,15 @@ export function HealthView({ onRunPipeline, pipelineBusy = false, refreshToken =
       header: 'Dataset',
       sortValue: (row) => row.name,
       sortLabel: 'dataset name',
+      width: '24%',
       render: (row) => (
-        <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, minWidth: 0, maxWidth: 260 }}>
           <span className="row-tight">
             <span className="strong mono">{row.name}</span>
             <span className="t-micro muted">{humanize(row.layer)}</span>
           </span>
           {row.detail !== null && row.detail !== '' && (
-            <span className="t-micro muted truncate" style={{ maxWidth: 360 }} title={row.detail}>
+            <span className="t-micro muted truncate" title={row.detail}>
               {row.detail}
             </span>
           )}
@@ -251,7 +252,10 @@ export function HealthView({ onRunPipeline, pipelineBusy = false, refreshToken =
       sortLabel: 'last write time',
       render: (row) =>
         row.updated_at !== null && row.updated_at !== '' ? (
-          <span className="t-small secondary nowrap">{dateTime(row.updated_at)}</span>
+          // Day here, exact timestamp on hover: the age column carries precision.
+          <span className="t-small secondary nowrap" title={dateTime(row.updated_at)}>
+            {date(row.updated_at)}
+          </span>
         ) : (
           <MissingValue status="missing" label="Last written" detail="This table has never been written." />
         ),
@@ -272,7 +276,7 @@ export function HealthView({ onRunPipeline, pipelineBusy = false, refreshToken =
       sortLabel: 'source',
       render: (row) =>
         row.source !== null && row.source !== '' ? (
-          <span className="mono t-micro muted">{row.source}</span>
+          <span className="mono t-micro muted nowrap">{row.source}</span>
         ) : (
           <MissingValue status="missing" label="Source" detail="No provider was recorded for this table." />
         ),

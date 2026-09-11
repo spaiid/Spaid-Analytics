@@ -3,9 +3,12 @@ import type { OpportunityRow } from '../../api/types';
 import * as fmt from '../../lib/format';
 import { isNum } from '../charts/chartUtils';
 import { DataTable, MissingValue, Pill, ScoreMeter, ValueOrMissing } from '../ui';
-import type { Column } from '../ui';
+import type { Column, SortState } from '../ui';
 import { bandTone, valuationTone } from './labels';
 import { ScoreDelta } from './ScoreDelta';
+
+/** Rank ascending: the order the API itself ranked the universe in. */
+export const DEFAULT_OPPORTUNITY_SORT: SortState = { key: 'rank', direction: 'asc' };
 
 export interface OpportunitiesTableProps {
   rows: OpportunityRow[];
@@ -14,6 +17,12 @@ export interface OpportunitiesTableProps {
   onOpen: (ticker: string) => void;
   /** Ticker of the row to mark as current, if any. */
   activeTicker?: string | null;
+  /**
+   * Controlled sort. The view holds it so that filtering down to nothing and
+   * back does not silently throw the reader's chosen order away.
+   */
+  sort?: SortState | null;
+  onSortChange?: (sort: SortState) => void;
   empty?: ReactNode;
 }
 
@@ -32,6 +41,8 @@ export function OpportunitiesTable({
   bandOrder,
   onOpen,
   activeTicker,
+  sort,
+  onSortChange,
   empty,
 }: OpportunitiesTableProps) {
   const columns = useMemo<Array<Column<OpportunityRow>>>(
@@ -161,7 +172,12 @@ export function OpportunitiesTable({
         title: "The API's classification of the price against its fair-value range.",
         width: '162px',
         render: (row) => {
-          const label = row.valuation_label ?? (row.valuation_class ? fmt.humanize(row.valuation_class) : null);
+          // The API supplies a compact form for this column and the full
+          // wording for the detail view; the client picks, never shortens.
+          const label =
+            row.valuation_label_short ??
+            row.valuation_label ??
+            (row.valuation_class ? fmt.humanize(row.valuation_class) : null);
           return label ? (
             <Pill tone={valuationTone(row.valuation_class, row.valuation_label)}>{label}</Pill>
           ) : (
@@ -197,7 +213,8 @@ export function OpportunitiesTable({
         sortValue: (row) => row.confidence,
         render: (row) => (
           <div className="cell-stack">
-            <span className="tnum">
+            {/* Same weight as the score numeral: confidence is never the junior partner. */}
+            <span className="tnum strong">
               <ValueOrMissing
                 value={row.confidence}
                 format={fmt.pct}
@@ -275,7 +292,9 @@ export function OpportunitiesTable({
       rows={rows}
       rowKey={(row) => row.company_id}
       ariaLabel="Ranked opportunities"
-      defaultSort={{ key: 'rank', direction: 'asc' }}
+      sort={sort}
+      onSortChange={onSortChange}
+      defaultSort={DEFAULT_OPPORTUNITY_SORT}
       onRowActivate={(row) => onOpen(row.ticker)}
       rowLabel={(row) => `Open ${row.ticker}, ${row.name}`}
       isRowActive={(row) => Boolean(activeTicker) && row.ticker === activeTicker}

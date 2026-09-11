@@ -8,6 +8,7 @@
 import type { ScoreChange, StockDetail } from '../../api/types';
 import { ArrowDownIcon, ArrowUpIcon, FlatIcon, Meter, Pill, StatTile, ValueOrMissing } from '../ui';
 import { currency, date, humanize, int, pct, points, score as fmtScore, signedPct } from '../../lib/format';
+import { confidenceFraction, confidenceText } from './metricFormat';
 
 function direction(value: number | null): 'up' | 'down' | 'flat' {
   if (typeof value !== 'number' || !Number.isFinite(value) || value === 0) return 'flat';
@@ -110,7 +111,15 @@ export function StockHeader({ detail }: StockHeaderProps) {
         <StatTile
           label="Confidence"
           hint="How much weight to put on the score above: coverage, data age, valuation agreement and score stability."
-          value={<ValueOrMissing value={confidence ? confidence.score : null} format={fmtScore} label="Confidence" />}
+          value={
+            <ValueOrMissing
+              value={confidence ? confidence.score : null}
+              format={(value) => confidenceText(value)}
+              label="Confidence"
+              status="missing"
+              detail="No confidence was recorded for this company."
+            />
+          }
           sub={
             confidence ? (
               <Pill tone="neutral" icon={false}>
@@ -123,11 +132,12 @@ export function StockHeader({ detail }: StockHeaderProps) {
         >
           <div className="sd-tile-meter">
             <Meter
-              value={confidence ? confidence.score : null}
+              value={confidence ? confidenceFraction(confidence.score) : null}
+              min={0}
+              max={1}
               label={`Confidence in the score for ${detail.ticker}`}
-              valueText={confidence ? `${fmtScore(confidence.score)} of 100, ${confidence.label}` : undefined}
+              valueText={confidence ? `${confidenceText(confidence.score)}, ${confidence.label}` : undefined}
               size="lg"
-              tone="neutral"
             />
           </div>
         </StatTile>

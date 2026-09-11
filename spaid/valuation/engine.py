@@ -34,7 +34,6 @@ import numpy as np
 from spaid.config.scoring import BusinessModel
 from spaid.config.valuation import (
     ClassificationSpec,
-    Scenario,
     ValuationClass,
     ValuationMethod,
     ValuationSpec,

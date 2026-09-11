@@ -228,6 +228,7 @@ export interface OpportunityRow {
   confidence_label: string | null;
   valuation_class: string | null;
   valuation_label: string | null;
+  valuation_label_short: string | null;
   /** Fraction to the fair-value midpoint. */
   upside: number | null;
   fair_value_low: number | null;
